@@ -1,12 +1,19 @@
 package capability
 
-import "strconv"
+import (
+	"strconv"
+	"time"
+)
 
 // ExecutionContext carries runtime context into Match and Invoke.
 type ExecutionContext struct {
 	// Manual is true when a human explicitly triggered the capability
 	// (e.g. via the UI) rather than an automated pipeline.
 	Manual bool
+
+	// Relevant for PeriodicCapabilities to know if
+	// its been >= Full() time since the last successful scan
+	Full bool
 
 	// Parameters holds the capability's declared parameters with their
 	// runtime values resolved.
@@ -151,6 +158,12 @@ type Capability[T any] interface {
 	Parameters() []Parameter
 	Match(ctx ExecutionContext, input T) error
 	Invoke(ctx ExecutionContext, input T, output Emitter) error
+}
+
+// PeriodicCapability is an optional interface that capabilities can implement to
+// control how often they run full scans. A full scan will have Full set in the ExecutionContext
+type PeriodicCapability interface {
+	Full() time.Duration
 }
 
 // Emitter is the output interface. Capabilities call Emit() with
