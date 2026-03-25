@@ -5,4 +5,5 @@ package capmodel
 type Asset struct {
 	DNS  string `json:"dns"`
 	Name string `json:"name"`
+	 Origins []string `json:"origins,omitempty"`
 }
