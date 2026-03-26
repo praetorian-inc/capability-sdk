@@ -10,4 +10,5 @@ type AWSResource struct {
 	Region       string         `json:"region"`
 	AccountRef   string         `json:"accountRef"`
 	Properties   map[string]any `json:"properties"`
+	Admin        *bool          `json:"admin"`
 }

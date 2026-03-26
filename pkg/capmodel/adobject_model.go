@@ -23,7 +23,7 @@ type ADObject struct {
 	EnrollmentAgentRestrictionsCollected    bool     `json:"enrollmentagentrestrictionscollected"`
 	IsUserSpecifiesSanEnabled               bool     `json:"isuserspecifiessanenabled"`
 	IsUserSpecifiesSanEnabledCollected      bool     `json:"isuserspecifiessanenabledcollected"`
-	RoleSeparationEnabled                   string   `json:"roleseparationenabled"`
+	RoleSeparationEnabled                   bool     `json:"roleseparationenabled"`
 	RoleSeparationEnabledCollected          bool     `json:"roleseparationenabledcollected"`
 	HasBasicConstraints                     bool     `json:"hasbasicconstraints"`
 	BasicConstraintPathLength               int      `json:"basicconstraintpathlength"`
@@ -34,18 +34,18 @@ type ADObject struct {
 	DomainSID                               string   `json:"domainsid"`
 	Sensitive                               bool     `json:"sensitive"`
 	BlocksInheritance                       bool     `json:"blocksinheritance"`
-	IsACL                                   string   `json:"isacl"`
+	IsACL                                   bool     `json:"isacl"`
 	IsACLProtected                          bool     `json:"isaclprotected"`
 	InheritanceHash                         string   `json:"inheritancehash"`
 	InheritanceHashes                       []string `json:"inheritancehashes"`
-	Enforced                                string   `json:"enforced"`
+	Enforced                                bool     `json:"enforced"`
 	Department                              string   `json:"department"`
 	HasCrossCertificatePair                 bool     `json:"hascrosscertificatepair"`
 	HasSPN                                  bool     `json:"hasspn"`
 	UnconstrainedDelegation                 bool     `json:"unconstraineddelegation"`
 	LastLogon                               int64    `json:"lastlogon"`
 	LastLogonTimestamp                      int64    `json:"lastlogontimestamp"`
-	IsPrimaryGroup                          string   `json:"isprimarygroup"`
+	IsPrimaryGroup                          bool     `json:"isprimarygroup"`
 	HasLAPS                                 bool     `json:"haslaps"`
 	DontRequirePreAuth                      bool     `json:"dontreqpreauth"`
 	LogonType                               string   `json:"logontype"`
@@ -54,7 +54,7 @@ type ADObject struct {
 	PasswordNotRequired                     bool     `json:"passwordnotreqd"`
 	FunctionalLevel                         string   `json:"functionallevel"`
 	TrustType                               string   `json:"trusttype"`
-	SpoofSIDHistoryBlocked                  string   `json:"spoofsidhistoryblocked"`
+	SpoofSIDHistoryBlocked                  bool     `json:"spoofsidhistoryblocked"`
 	TrustedToAuth                           bool     `json:"trustedtoauth"`
 	SAMAccountName                          string   `json:"samaccountname"`
 	CertificateMappingMethodsRaw            int      `json:"certificatemappingmethodsraw"`
@@ -139,12 +139,12 @@ type ADObject struct {
 	NTLMMinServerSec                        int      `json:"ntlmminserversec"`
 	NTLMMinClientSec                        int      `json:"ntlmminclientsec"`
 	LMCompatibilityLevel                    string   `json:"lmcompatibilitylevel"`
-	UseMachineID                            string   `json:"usemachineid"`
+	UseMachineID                            bool     `json:"usemachineid"`
 	ClientAllowedNTLMServers                string   `json:"clientallowedntlmservers"`
-	Transitive                              string   `json:"transitive"`
+	Transitive                              bool     `json:"transitive"`
 	GroupScope                              string   `json:"groupscope"`
 	NetBIOS                                 string   `json:"netbios"`
-	AdminSDHolderProtected                  string   `json:"adminsdholderprotected"`
+	AdminSDHolderProtected                  bool     `json:"adminsdholderprotected"`
 	ServicePrincipalNames                   []string `json:"serviceprincipalnames"`
 	OperatingSystem                         string   `json:"operatingsystem"`
 }
