@@ -166,6 +166,14 @@ type PeriodicCapability interface {
 	Full() time.Duration
 }
 
+// TimeoutCapability is an optional interface that capabilities can implement
+// to declare their expected worst-case execution time. The returned value is
+// used as the SQS visibility timeout (in minutes). When not implemented, the
+// default 10-minute timeout applies.
+type TimeoutCapability interface {
+	Timeout() int
+}
+
 // Emitter is the output interface. Capabilities call Emit() with
 // capmodel types. In chariot this wraps job.Send(); in tests it
 // collects into a slice.
