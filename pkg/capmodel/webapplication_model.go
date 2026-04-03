@@ -3,8 +3,11 @@
 package capmodel
 
 type WebApplication struct {
-	PrimaryURL string   `json:"primary_url"`
-	URLs       []string `json:"urls"`
-	Name       string   `json:"name"`
-	OpenAPI    string   `json:"openapi"`
+	PrimaryURL        string   `json:"primary_url"`
+	URLs              []string `json:"urls"`
+	Name              string   `json:"name"`
+	Complexity        string   `json:"complexity"`
+	SecurityRelevance string   `json:"security_relevance"`
+	Seed              bool     `json:"seed"`
+	OpenAPI           string   `json:"openapi"`
 }
