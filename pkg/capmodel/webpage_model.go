@@ -3,6 +3,21 @@
 package capmodel
 
 type Webpage struct {
-	URL    string         `json:"url"`
-	Parent WebApplication `json:"parent"`
+	URL      string           `json:"url"`
+	Requests []WebpageRequest `json:"requests"`
+	Parent   WebApplication   `json:"parent"`
+}
+
+type WebpageRequest struct {
+	RequestedURL string              `json:"requested_url"`
+	Method       string              `json:"method"`
+	Headers      map[string][]string `json:"headers"`
+	Body         string              `json:"body"`
+	Response     *WebpageResponse    `json:"response"`
+}
+
+type WebpageResponse struct {
+	StatusCode int                 `json:"status_code"`
+	Headers    map[string][]string `json:"headers"`
+	Body       string              `json:"body"`
 }
