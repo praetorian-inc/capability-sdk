@@ -3,7 +3,9 @@
 package capmodel
 
 type Asset struct {
-	Capability []string `json:"capability"`
-	DNS        string   `json:"dns"`
-	Name       string   `json:"name"`
+	Confidence  *float64 `json:"confidence"`
+	NeedsReview *bool    `json:"needsReview"`
+	Capability  []string `json:"capability"`
+	DNS         string   `json:"dns"`
+	Name        string   `json:"name"`
 }
