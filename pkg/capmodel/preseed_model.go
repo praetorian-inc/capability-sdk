@@ -3,8 +3,10 @@
 package capmodel
 
 type Preseed struct {
-	Type       string `json:"type"`
-	Title      string `json:"title"`
-	Value      string `json:"value"`
-	Capability string `json:"capability"`
+	Confidence  *float64 `json:"confidence"`
+	NeedsReview *bool    `json:"needsReview"`
+	Type        string   `json:"type"`
+	Title       string   `json:"title"`
+	Value       string   `json:"value"`
+	Capability  string   `json:"capability"`
 }
