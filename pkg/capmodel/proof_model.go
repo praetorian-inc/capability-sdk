@@ -27,6 +27,7 @@ type ProofElement struct {
 	Metric       *ProofMetric       `json:"metric"`
 	Reference    *ProofReference    `json:"reference"`
 	Image        *ProofImage        `json:"image"`
+	Timeline     *ProofTimeline     `json:"timeline"`
 }
 
 type ProofHeading struct {
@@ -144,4 +145,15 @@ type ProofImage struct {
 	DataURI string `json:"data_uri"`
 	AltText string `json:"alt_text"`
 	Caption string `json:"caption"`
+}
+
+type ProofTimeline struct {
+	Entries []ProofTimelineEntry `json:"entries"`
+}
+
+type ProofTimelineEntry struct {
+	Title     string `json:"title"`
+	Subtitle  string `json:"subtitle"`
+	Reference string `json:"reference"`
+	Href      string `json:"href"`
 }
