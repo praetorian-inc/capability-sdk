@@ -18,6 +18,22 @@ type ExecutionContext struct {
 	// Parameters holds the capability's declared parameters with their
 	// runtime values resolved.
 	Parameters Parameters
+
+	Metrics Metrics
+}
+
+type Metrics struct {
+	increment func(key string, delta int)
+}
+
+func NewMetrics(fn func(key string, delta int)) Metrics {
+	return Metrics{increment: fn}
+}
+
+func (m Metrics) IncrementMetric(key string, delta int) {
+	if m.increment != nil {
+		m.increment(key, delta)
+	}
 }
 
 // Parameter declares a single configurable parameter for a capability.
