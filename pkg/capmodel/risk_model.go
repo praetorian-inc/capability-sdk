@@ -5,6 +5,7 @@ package capmodel
 type Risk struct {
 	TargetName string `json:"target_name"`
 	Name       string `json:"name"`
+	Title      string `json:"title"`
 	Source     string `json:"source"`
 	Status     string `json:"status"`
 	Proof      []byte `json:"proof"`
