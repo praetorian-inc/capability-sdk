@@ -20,6 +20,35 @@ type ExecutionContext struct {
 	Parameters Parameters
 
 	Metrics Metrics
+
+	// Cache, when non-nil, gives the capability access to the runtime's result cache.
+	// Capabilities that compute expensive results across many similar inputs (e.g. nuclei
+	// scans against equivalent webpages) can wrap their inner work in Cache.Call to
+	// dedupe. The runtime is responsible for partitioning by capability and tenant; the
+	// capability supplies a similarity hash and a deterministic key set for exact-match
+	// fallback. Implementations are expected to be safe for concurrent use.
+	Cache Cache
+}
+
+// Cache is the runtime-supplied cache facility attached to ExecutionContext. The runtime
+// determines storage backend, namespace, and similarity threshold; capabilities only decide
+// what to cache, the similarity hash to use, and the exact-match keys.
+type Cache interface {
+	// Call runs fn on cache miss and stores the result for future calls.
+	//
+	//  - ttl: unix timestamp at which the entry expires (0 = never expire).
+	//  - similarityHash: 64-bit locality-sensitive hash of the *input content* (not the
+	//    keys). Pass 0 to opt out of similarity matching and use only the exact-key path.
+	//    Mixing in scan-config bits via XOR is encouraged when different configs against
+	//    the same content shouldn't share a cache entry.
+	//  - fn: produces the value to cache, returning the marshaled bytes and an error.
+	//    Called only on cache miss; the runtime serializes its result into storage as-is.
+	//  - keys: deterministic exact-match key components. Used both for cache writeback
+	//    identity and for the exact-key fallback when similarity-based lookup misses.
+	//
+	// Returns the cached or freshly computed bytes. Errors from fn are returned without
+	// any storage side-effects.
+	Call(ttl int64, similarityHash uint64, fn func() ([]byte, error), keys ...string) ([]byte, error)
 }
 
 type Metrics struct {
