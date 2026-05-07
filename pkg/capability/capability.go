@@ -32,23 +32,29 @@ type ExecutionContext struct {
 
 // Cache is the runtime-supplied cache facility attached to ExecutionContext. The runtime
 // determines storage backend, namespace, and similarity threshold; capabilities only decide
-// what to cache, the similarity hash to use, and the exact-match keys.
+// what to cache, how to fingerprint the content, and how to scope it.
 type Cache interface {
 	// Call runs fn on cache miss and stores the result for future calls.
 	//
 	//  - ttl: unix timestamp at which the entry expires (0 = never expire).
-	//  - similarityHash: 64-bit locality-sensitive hash of the *input content* (not the
-	//    keys). Pass 0 to opt out of similarity matching and use only the exact-key path.
-	//    Mixing in scan-config bits via XOR is encouraged when different configs against
-	//    the same content shouldn't share a cache entry.
+	//  - similarityHash: 64-bit locality-sensitive hash of the *input content*. Pass 0 to
+	//    opt out of similarity matching and use only the exact-key path. The hash should
+	//    reflect content only; isolate distinct scan configurations via partitionKeys
+	//    instead of folding them into the hash.
 	//  - fn: produces the value to cache, returning the marshaled bytes and an error.
 	//    Called only on cache miss; the runtime serializes its result into storage as-is.
-	//  - keys: deterministic exact-match key components. Used both for cache writeback
+	//  - partitionKeys: deterministic components that scope the cache *partition*. Two
+	//    calls with different partitionKeys never share entries, even when their
+	//    similarityHash matches. Use this for scan-config disambiguation (template set,
+	//    rate limit, mode flags) — anything where a hit across the boundary would be
+	//    semantically wrong. Pass nil if there's no need to subdivide.
+	//  - contentKeys: deterministic components that form the *exact-match* key within a
+	//    partition. The runtime composes them into a stable cache row key for writeback
 	//    identity and for the exact-key fallback when similarity-based lookup misses.
 	//
 	// Returns the cached or freshly computed bytes. Errors from fn are returned without
 	// any storage side-effects.
-	Call(ttl int64, similarityHash uint64, fn func() ([]byte, error), keys ...string) ([]byte, error)
+	Call(ttl int64, similarityHash uint64, fn func() ([]byte, error), partitionKeys []string, contentKeys ...string) ([]byte, error)
 }
 
 type Metrics struct {
