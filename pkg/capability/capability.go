@@ -37,10 +37,10 @@ type Cache interface {
 	// Call runs fn on cache miss and stores the result for future calls.
 	//
 	//  - ttl: unix timestamp at which the entry expires (0 = never expire).
-	//  - similarityHash: 64-bit locality-sensitive hash of the *input content* (not the
-	//    keys). Pass 0 to opt out of similarity matching and use only the exact-key path.
-	//    Mixing in scan-config bits via XOR is encouraged when different configs against
-	//    the same content shouldn't share a cache entry.
+	//  - similarityHash: 64-bit locality-sensitive hash of the *input content*. Pass 0 to
+	//    opt out of similarity matching and use only the exact-key path. The hash should
+	//    reflect content only; isolate distinct scan configurations via Within instead of
+	//    folding them into the hash.
 	//  - fn: produces the value to cache, returning the marshaled bytes and an error.
 	//    Called only on cache miss; the runtime serializes its result into storage as-is.
 	//  - keys: deterministic exact-match key components. Used both for cache writeback
@@ -49,6 +49,17 @@ type Cache interface {
 	// Returns the cached or freshly computed bytes. Errors from fn are returned without
 	// any storage side-effects.
 	Call(ttl int64, similarityHash uint64, fn func() ([]byte, error), keys ...string) ([]byte, error)
+
+	// Within returns a Cache scoped to a sub-partition of this cache. Entries written via
+	// the returned Cache are isolated from the parent: locality-sensitive lookups never
+	// cross the boundary, so a capability with multiple distinct scan configurations can
+	// pass each configuration's deterministic fingerprint to Within and rely on the
+	// runtime to keep their near-duplicate lookups separate.
+	//
+	// Implementations should compose scopes deterministically — c.Within("a").Within("b")
+	// must yield the same partition as a single Within("a:b") (or whatever join the
+	// implementation uses), so callers can either nest or pre-compose.
+	Within(subspace string) Cache
 }
 
 type Metrics struct {
