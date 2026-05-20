@@ -3,10 +3,12 @@
 package capmodel
 
 type Repository struct {
-	LastScanState map[string]string `json:"lastScanState"`
-	URL           string            `json:"url"`
-	Org           string            `json:"org"`
-	Name          string            `json:"name"`
-	Public        bool              `json:"public"`
-	SelfHosted    bool              `json:"selfhosted"`
+	LastScanState    map[string]string `json:"lastScanState"`
+	URL              string            `json:"url"`
+	Org              string            `json:"org"`
+	Name             string            `json:"name"`
+	Type             string            `json:"type"`
+	Public           bool              `json:"public"`
+	SelfHosted       bool              `json:"selfhosted"`
+	SourceArchiveKey string            `json:"sourceArchiveKey"`
 }
