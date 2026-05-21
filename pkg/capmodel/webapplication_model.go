@@ -7,5 +7,6 @@ type WebApplication struct {
 	URLs       []string `json:"urls"`
 	Name       string   `json:"name"`
 	Seed       bool     `json:"seed"`
-	OpenAPI    string   `json:"openapi"`
+	Spec       string   `json:"spec"`
+	SpecFormat string   `json:"spec_format"`
 }
