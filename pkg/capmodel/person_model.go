@@ -3,25 +3,24 @@
 package capmodel
 
 type Person struct {
-	FirstName        *string   `json:"first_name"`
-	LastName         *string   `json:"last_name"`
-	Name             *string   `json:"name"`
-	Email            *string   `json:"email"`
-	Title            *string   `json:"title"`
-	Headline         *string   `json:"headline"`
-	Phone            *string   `json:"phone"`
-	PersonalEmails   *[]string `json:"personal_emails"`
-	WorkEmail        *string   `json:"work_email"`
-	LinkedinURL      *string   `json:"linkedin_url"`
-	TwitterURL       *string   `json:"twitter_url"`
-	FacebookURL      *string   `json:"facebook_url"`
-	GithubURL        *string   `json:"github_url"`
-	PhotoURL         *string   `json:"photo_url"`
-	OrganizationName *string   `json:"organization_name"`
-	Country          *string   `json:"country"`
-	State            *string   `json:"state"`
-	City             *string   `json:"city"`
-	Seniority        *string   `json:"seniority"`
-	Departments      *[]string `json:"departments"`
-	Functions        *[]string `json:"functions"`
+	FirstName         string          `json:"first_name"`
+	LastName          string          `json:"last_name"`
+	Email             string          `json:"email"`
+	Title             string          `json:"title"`
+	WorkEmail         string          `json:"work_email"`
+	GithubURL         string          `json:"github_url"`
+	Country           string          `json:"country"`
+	State             string          `json:"state"`
+	City              string          `json:"city"`
+	Sources           *[]PersonSource `json:"sources"`
+	ConfirmedAccounts *[]string       `json:"confirmed_accounts"`
+	Seniority         string          `json:"seniority"`
+	Department        string          `json:"department"`
+}
+
+type PersonSource struct {
+	Provider   string `json:"provider"`
+	Confidence string `json:"confidence"`
+	Status     string `json:"status"`
+	LastSeen   string `json:"last_seen"`
 }
