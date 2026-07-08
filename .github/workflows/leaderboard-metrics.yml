@@ -11,4 +11,4 @@ permissions:
 
 jobs:
   metrics:
-    uses: praetorian-inc/public-workflows/.github/workflows/leaderboard-metrics.yml@main
+    uses: praetorian-inc/public-workflows/.github/workflows/leaderboard-metrics.yml@c351826e6de27cadeb5b32ce81157355b283518b # v2.16.3
