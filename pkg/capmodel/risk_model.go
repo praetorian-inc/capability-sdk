@@ -3,11 +3,15 @@
 package capmodel
 
 type Risk struct {
-	TargetName string `json:"target_name"`
-	Name       string `json:"name"`
-	Title      string `json:"title"`
-	Source     string `json:"source"`
-	Status     string `json:"status"`
-	Proof      []byte `json:"proof"`
-	Target     any    `json:"target"`
+	TargetName    string   `json:"target_name"`
+	Name          string   `json:"name"`
+	Title         string   `json:"title"`
+	Source        string   `json:"source"`
+	Status        string   `json:"status"`
+	CweCodes      []string `json:"cwe_codes"`
+	CvssVector    string   `json:"cvss_vector"`
+	CvssScore     *float32 `json:"cvss_score"`
+	CvssRationale string   `json:"cvss_rationale"`
+	Proof         []byte   `json:"proof"`
+	Target        any      `json:"target"`
 }
