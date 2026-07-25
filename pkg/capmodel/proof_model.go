@@ -9,6 +9,7 @@ type Proof struct {
 
 type ProofSection struct {
 	Title    string         `json:"title"`
+	Role     string         `json:"role"`
 	Elements []ProofElement `json:"elements"`
 }
 
