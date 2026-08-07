@@ -10,6 +10,7 @@ type Proof struct {
 type ProofSection struct {
 	Title    string         `json:"title"`
 	Role     string         `json:"role"`
+	Outcome  string         `json:"outcome"`
 	Elements []ProofElement `json:"elements"`
 }
 
@@ -43,6 +44,7 @@ type ProofParagraph struct {
 
 type ProofGroup struct {
 	Title    string         `json:"title"`
+	Role     string         `json:"role"`
 	Elements []ProofElement `json:"elements"`
 }
 
