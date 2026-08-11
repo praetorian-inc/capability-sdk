@@ -4,7 +4,7 @@ package capmodel
 
 type Asset struct {
 	Confidences []Confidence `json:"confidences"`
-	Confidence  *float64     `json:"confidence"`
+	Confidence  *int         `json:"confidence"`
 	NeedsReview *bool        `json:"needsReview"`
 	ASNumber    string       `json:"asnumber"`
 	ASName      string       `json:"asname"`
@@ -14,6 +14,6 @@ type Asset struct {
 }
 
 type Confidence struct {
-	Score         float64 `json:"score"`
-	Justification string  `json:"justification"`
+	Score         int    `json:"score"`
+	Justification string `json:"justification"`
 }

@@ -4,7 +4,7 @@ package capmodel
 
 type Preseed struct {
 	Confidences []Confidence `json:"confidences"`
-	Confidence  *float64     `json:"confidence"`
+	Confidence  *int         `json:"confidence"`
 	NeedsReview *bool        `json:"needsReview"`
 	Type        string       `json:"type"`
 	Title       string       `json:"title"`
