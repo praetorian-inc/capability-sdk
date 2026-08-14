@@ -6,8 +6,8 @@ type Preseed struct {
 	Confidences []Confidence `json:"confidences"`
 	Confidence  *int         `json:"confidence"`
 	NeedsReview *bool        `json:"needsReview"`
+	Capability  []string     `json:"capability"`
 	Type        string       `json:"type"`
 	Title       string       `json:"title"`
 	Value       string       `json:"value"`
-	Capability  string       `json:"capability"`
 }
