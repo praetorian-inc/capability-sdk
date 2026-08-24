@@ -54,10 +54,10 @@ func TestAggregator_ConcurrentSubmits(t *testing.T) {
 		go func(goroutineID int) {
 			defer wg.Done()
 			for j := 0; j < findingsPerGoroutine; j++ {
-				agg.Submit(context.Background(), formatter.Finding{
+				assert.NoError(t, agg.Submit(context.Background(), formatter.Finding{
 					ID:    fmt.Sprintf("g%d-f%d", goroutineID, j),
 					Title: "Concurrent Finding",
-				})
+				}))
 			}
 		}(i)
 	}
@@ -93,7 +93,7 @@ func TestAggregator_ContextCancellation(t *testing.T) {
 	err = agg.Submit(ctx, formatter.Finding{ID: "test"})
 	assert.ErrorIs(t, err, context.Canceled)
 
-	agg.Close()
+	require.NoError(t, agg.Close())
 }
 
 func TestAggregator_SubmitAfterClose(t *testing.T) {
@@ -104,7 +104,7 @@ func TestAggregator_SubmitAfterClose(t *testing.T) {
 	})
 
 	agg := formatter.NewAggregator(f, 10)
-	agg.Close()
+	require.NoError(t, agg.Close())
 
 	err := agg.Submit(context.Background(), formatter.Finding{ID: "test"})
 	assert.ErrorIs(t, err, formatter.ErrAggregatorClosed)
