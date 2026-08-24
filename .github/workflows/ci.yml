@@ -26,5 +26,6 @@ jobs:
     permissions:
       contents: read
     with:
+      golangci-lint-version: "v2.13.1"
       enable-build: false
     secrets: inherit

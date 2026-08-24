@@ -96,10 +96,10 @@ func TestMarkdownFormatter_WithToolInfo(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	f.Initialize(context.Background(), formatter.ToolInfo{
+	require.NoError(t, f.Initialize(context.Background(), formatter.ToolInfo{
 		Name:    "Diocletian",
 		Version: "1.0.0",
-	})
+	}))
 
 	err = f.Complete(context.Background(), formatter.Summary{})
 	require.NoError(t, err)
@@ -121,8 +121,8 @@ func TestMarkdownFormatter_BufferedInterface(t *testing.T) {
 
 	assert.Equal(t, 0, bf.Len())
 
-	f.Format(context.Background(), formatter.Finding{ID: "1"})
-	f.Format(context.Background(), formatter.Finding{ID: "2"})
+	require.NoError(t, f.Format(context.Background(), formatter.Finding{ID: "1"}))
+	require.NoError(t, f.Format(context.Background(), formatter.Finding{ID: "2"}))
 	assert.Equal(t, 2, bf.Len())
 
 	bf.Reset()
