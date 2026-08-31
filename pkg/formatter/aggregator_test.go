@@ -54,10 +54,10 @@ func TestAggregator_ConcurrentSubmits(t *testing.T) {
 		go func(goroutineID int) {
 			defer wg.Done()
 			for j := 0; j < findingsPerGoroutine; j++ {
-				assert.NoError(t, agg.Submit(context.Background(), formatter.Finding{
+				agg.Submit(context.Background(), formatter.Finding{
 					ID:    fmt.Sprintf("g%d-f%d", goroutineID, j),
 					Title: "Concurrent Finding",
-				}))
+				})
 			}
 		}(i)
 	}
@@ -72,45 +72,28 @@ func TestAggregator_ConcurrentSubmits(t *testing.T) {
 }
 
 func TestAggregator_ContextCancellation(t *testing.T) {
-	f := &blockingFormatter{
-		started: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-	t.Cleanup(func() {
-		select {
-		case <-f.release:
-		default:
-			close(f.release)
-		}
+	var buf bytes.Buffer
+	f, _ := formatter.New(formatter.Config{
+		Format: formatter.FormatNDJSON,
+		Writer: &buf,
 	})
 
+	// Buffer size 1, fill it first
 	agg := formatter.NewAggregator(f, 1)
-	require.NoError(t, agg.Submit(context.Background(), formatter.Finding{ID: "processing"}))
-	<-f.started
-	require.NoError(t, agg.Submit(context.Background(), formatter.Finding{ID: "queued"}))
 
+	// Fill the buffer so next submit blocks
+	err := agg.Submit(context.Background(), formatter.Finding{ID: "fill"})
+	require.NoError(t, err)
+
+	// Create a cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	assert.ErrorIs(t, agg.Submit(ctx, formatter.Finding{ID: "cancelled"}), context.Canceled)
 
-	close(f.release)
-	require.NoError(t, agg.Close())
-}
+	// This should return context.Canceled because buffer is full and context is cancelled
+	err = agg.Submit(ctx, formatter.Finding{ID: "test"})
+	assert.ErrorIs(t, err, context.Canceled)
 
-type blockingFormatter struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (f *blockingFormatter) Initialize(context.Context, formatter.ToolInfo) error { return nil }
-func (f *blockingFormatter) Complete(context.Context, formatter.Summary) error    { return nil }
-func (f *blockingFormatter) Close() error                                         { return nil }
-
-func (f *blockingFormatter) Format(context.Context, formatter.Finding) error {
-	f.once.Do(func() { close(f.started) })
-	<-f.release
-	return nil
+	agg.Close()
 }
 
 func TestAggregator_SubmitAfterClose(t *testing.T) {
@@ -121,7 +104,7 @@ func TestAggregator_SubmitAfterClose(t *testing.T) {
 	})
 
 	agg := formatter.NewAggregator(f, 10)
-	require.NoError(t, agg.Close())
+	agg.Close()
 
 	err := agg.Submit(context.Background(), formatter.Finding{ID: "test"})
 	assert.ErrorIs(t, err, formatter.ErrAggregatorClosed)

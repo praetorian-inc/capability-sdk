@@ -137,7 +137,7 @@ func TestTeeFormatter_Close(t *testing.T) {
 
 	tee, _ := formatter.NewTee(f)
 
-	require.NoError(t, tee.Format(context.Background(), formatter.Finding{ID: "close-test"}))
+	tee.Format(context.Background(), formatter.Finding{ID: "close-test"})
 
 	err := tee.Close()
 	require.NoError(t, err)

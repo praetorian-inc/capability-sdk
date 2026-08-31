@@ -50,9 +50,7 @@ func (f *TerminalFormatter) initStyles() {
 
 func (f *TerminalFormatter) Initialize(ctx context.Context, info ToolInfo) error {
 	if info.Name != "" {
-		if _, err := fmt.Fprintf(f.w, "=== %s v%s ===\n\n", info.Name, info.Version); err != nil {
-			return err
-		}
+		fmt.Fprintf(f.w, "=== %s v%s ===\n\n", info.Name, info.Version)
 		return f.w.Flush()
 	}
 	return nil
@@ -66,19 +64,13 @@ func (f *TerminalFormatter) Format(ctx context.Context, finding Finding) error {
 	}
 
 	sev := f.formatSeverity(finding.Severity)
-	if _, err := fmt.Fprintf(f.w, "[%s] %s\n", sev, finding.Title); err != nil {
-		return err
-	}
+	fmt.Fprintf(f.w, "[%s] %s\n", sev, finding.Title)
 
 	loc := finding.Location.String()
 	if loc != "" {
-		if _, err := fmt.Fprintf(f.w, "  Resource: %s\n", loc); err != nil {
-			return err
-		}
+		fmt.Fprintf(f.w, "  Resource: %s\n", loc)
 	}
-	if _, err := fmt.Fprintln(f.w); err != nil {
-		return err
-	}
+	fmt.Fprintln(f.w)
 
 	return f.w.Flush() // Immediate visibility
 }
@@ -104,11 +96,9 @@ func (f *TerminalFormatter) formatSeverity(s Severity) string {
 }
 
 func (f *TerminalFormatter) Complete(ctx context.Context, summary Summary) error {
-	if _, err := fmt.Fprintf(f.w, "---\nTotal: %d findings (Critical: %d, High: %d, Medium: %d, Low: %d, Info: %d)\n",
+	fmt.Fprintf(f.w, "---\nTotal: %d findings (Critical: %d, High: %d, Medium: %d, Low: %d, Info: %d)\n",
 		summary.TotalFindings, summary.CriticalCount, summary.HighCount,
-		summary.MediumCount, summary.LowCount, summary.InfoCount); err != nil {
-		return err
-	}
+		summary.MediumCount, summary.LowCount, summary.InfoCount)
 	return f.w.Flush()
 }
 
