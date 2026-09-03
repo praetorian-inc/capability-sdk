@@ -26,14 +26,21 @@
 // the generated markdown reference, flagged "(hidden)" in the index and
 // annotated "Hidden: not shown in `--help` output" in its own section; the JSON
 // artifact carries it too, with "hidden": true. A deprecated command is present
-// and annotated everywhere.
+// in every artifact, and annotated in the generated markdown reference --
+// "(deprecated: ...)" in the index and a "- Deprecated:" line in its own
+// section -- and in the JSON artifact, through a "deprecated" field; the two
+// README regions list it with no notice at all, because the subcommand listing
+// writes Command.Short verbatim and the alias table carries only a name and
+// its aliases.
 //
 // That split is deliberate: hiding a command is a statement that users should
 // not discover it, so it stays out of the README, which is the surface users
 // read to find out what the tool does. Deprecating one is a statement that
-// users must be told to stop using it, so it is annotated wherever it appears.
-// The reference and the JSON artifact are the complete record rather than a
-// discovery surface, which is why hidden commands belong in them.
+// users must be told to stop using it, so it is never dropped from any
+// artifact, and the generated reference and the JSON artifact publish its
+// notice: they are the complete record rather than a discovery surface, which
+// is why hidden commands belong in them too. The README regions stay a bare
+// listing of name, description and aliases.
 //
 // Two tests lock the two halves, each over the surface it actually covers --
 // TestRenderRegionsSkipsHiddenSubcommands over the rendered README subcommand
