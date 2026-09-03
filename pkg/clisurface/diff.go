@@ -162,8 +162,16 @@ func diffFlag(path string, doc, live *Flag) []Finding {
 // Report renders findings as a failure message that says what drifted, which
 // files carry the stale copy, and the one command that fixes them. The files it
 // names are [Docs.GeneratedPaths] and the command is the resolved
-// Config.RegenerateCommand, so a caller cannot report a remediation that does
-// not match the configuration the artifacts were generated from.
+// Config.RegenerateCommand, both read from this Docs' own resolved
+// configuration, so the paths and the command it prints cannot disagree with
+// each other -- where the earlier three-argument form, taking a path list and a
+// regenerate command as separate arguments, let a caller pair two that had
+// nothing to do with one another.
+//
+// Reporting through the Docs the artifacts were generated from remains the
+// caller's responsibility. [Diff] is a free function, so a []Finding carries no
+// configuration identity, and handing findings to a different Docs names that
+// one's paths and command.
 func (d *Docs) Report(findings []Finding) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CLI surface drift: %d disagreement(s) between the generated documentation and the cobra command tree.\n\n",
