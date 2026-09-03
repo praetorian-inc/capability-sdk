@@ -86,7 +86,7 @@
 // # Concurrency
 //
 // Walk is single-goroutine-per-tree, and the values it returns ([Surface],
-// [Command], [Flag], Allowlist) are safe to share read-only -- including
+// [Command], [Flag], [Allowlist]) are safe to share read-only -- including
 // concurrent Hash, Diff, LintMarkdown and CheckArtifacts on the same value,
 // provided no one mutates the Surface after handing it over. A Docs is
 // read-only once New returns it, so its checking methods may be called
