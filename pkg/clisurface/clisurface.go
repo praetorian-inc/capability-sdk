@@ -1,14 +1,14 @@
 // Package clisurface derives a structured description of a cobra command tree
 // and generates, splices and checks the documentation artifacts built from it.
 //
-// Walk turns a *cobra.Command into a [Surface]: every non-hidden command, its
-// aliases, and its resolved flags. A [Docs], built from a [Config] by [New],
-// renders that surface into a JSON artifact and a markdown command reference,
-// splices generated regions into a README, and checks committed prose and Go
-// comments against the surface so documentation cannot silently drift from the
-// binary. The intended shape is a hidden "cli-docs" command in the consumer's
-// own binary that regenerates the artifacts, plus a CI check that fails when
-// the committed files no longer match.
+// Walk turns a *cobra.Command into a [Surface]: every command -- hidden ones
+// included -- with its aliases and its resolved flags. A [Docs], built from a
+// [Config] by [New], renders that surface into a JSON artifact and a markdown
+// command reference, splices generated regions into a README, and checks
+// committed prose and Go comments against the surface so documentation cannot
+// silently drift from the binary. The intended shape is a hidden "cli-docs"
+// command in the consumer's own binary that regenerates the artifacts, plus a
+// CI check that fails when the committed files no longer match.
 //
 // Construct a Config as a keyed literal: fields are added over time, and only
 // RegenerateCommand has no default.
@@ -19,14 +19,27 @@
 //
 // # What is documented, and what is not
 //
-// A hidden command is absent from every generated artifact, and a deprecated
-// one is present and annotated. That split is deliberate: hiding a command is a
-// statement that users should not discover it, while deprecating one is a
-// statement that users must be told to stop using it. Two tests lock the
-// behaviour in place -- TestRenderRegionsSkipsHiddenSubcommands and
-// TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands -- so a change to
-// either half fails loudly rather than quietly editing what the artifacts
-// disclose.
+// The split is per artifact, not global, and [Walk] itself filters nothing:
+// every command reaches the [Surface], and each renderer decides what to
+// disclose. A hidden command is omitted from the generated README regions --
+// the Quick Start subcommand listing and the alias table -- and is present in
+// the generated markdown reference, flagged "(hidden)" in the index and
+// annotated "Hidden: not shown in `--help` output" in its own section; the JSON
+// artifact carries it too, with "hidden": true. A deprecated command is present
+// and annotated everywhere.
+//
+// That split is deliberate: hiding a command is a statement that users should
+// not discover it, so it stays out of the README, which is the surface users
+// read to find out what the tool does. Deprecating one is a statement that
+// users must be told to stop using it, so it is annotated wherever it appears.
+// The reference and the JSON artifact are the complete record rather than a
+// discovery surface, which is why hidden commands belong in them.
+//
+// Two tests lock the two halves, each over the surface it actually covers --
+// TestRenderRegionsSkipsHiddenSubcommands over the rendered README subcommand
+// region, and TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands over the
+// markdown reference -- so a change to either half fails loudly rather than
+// quietly editing what the artifacts disclose.
 //
 // # Flag defaults are published verbatim
 //
