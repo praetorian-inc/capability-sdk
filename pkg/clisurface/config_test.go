@@ -209,7 +209,9 @@ func TestNew_HonoursAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) { cfg.LintedMarkdown = []string{} })
 	cfg := d.Config()
 
-	assert.Empty(t, cfg.LintedMarkdown, "an explicitly empty slice opts out; only a nil slice takes the default")
+	assert.NotNil(t, cfg.LintedMarkdown,
+		"an explicitly empty slice must survive as an empty slice; collapsing it to nil would re-enable the default")
+	assert.Len(t, cfg.LintedMarkdown, 0, "an explicitly empty slice opts out; only a nil slice takes the default")
 	assert.Equal(t, []string{"cmd", "internal", "pkg"}, cfg.LintedGoDirs)
 }
 
@@ -223,4 +225,150 @@ func TestGeneratedPaths_ListsTheThreeArtifactsInStableOrder(t *testing.T) {
 	d := newTestDocs(t)
 
 	assert.Equal(t, []string{"docs/cli-surface.json", "docs/CLI.md", "README.md"}, d.GeneratedPaths())
+}
+
+// TestNew_RejectsAnEmptyLintScopeEntry is the reachable half of the empty-path
+// rule: the scalar path fields are defaulted before validate sees them, but a
+// slice entry is not, so an empty entry arrives exactly as the caller wrote it.
+// Left unchecked it would widen the Go comment walk from the named roots to the
+// whole repository.
+func TestNew_RejectsAnEmptyLintScopeEntry(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{""}})
+
+	assert.Contains(t, msg, "Config.LintedGoDirs[0] must not be empty")
+}
+
+func TestNew_RejectsAnAbsoluteLintScopeEntry(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{"/etc"}})
+
+	assert.Contains(t, msg, "Config.LintedGoDirs[0]")
+	assert.Contains(t, msg, "repository-relative")
+}
+
+func TestNew_RejectsAParentTraversalLintScopeEntry(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedMarkdown: []string{"../../secrets.md"}})
+
+	assert.Contains(t, msg, "Config.LintedMarkdown[0]")
+	assert.Contains(t, msg, "..")
+}
+
+func TestNew_NamesTheOffendingLintScopeEntryByItsIndex(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{"cmd", "../outside"}})
+
+	assert.Contains(t, msg, "Config.LintedGoDirs[1]", "the index must point at the entry at fault")
+	assert.NotContains(t, msg, "Config.LintedGoDirs[0]", "and must not accuse the valid entry beside it")
+}
+
+func TestNew_RejectsIdenticalRegionNames(t *testing.T) {
+	msg := newTestDocsError(t, Config{
+		RegenerateCommand: testRegenerateCommand,
+		SubcommandsRegion: "cli-tables",
+		AliasesRegion:     "cli-tables",
+	})
+
+	assert.Contains(t, msg, "Config.SubcommandsRegion", "one marker pair cannot hold both generated tables")
+	assert.Contains(t, msg, "Config.AliasesRegion")
+}
+
+// TestNew_RejectsCollidingArtifactPaths covers the destructive case: two
+// artifact paths naming one file means generation overwrites one artifact with
+// another, and GeneratedPaths reports the same name twice, so the staging list
+// and the drift report both read as if nothing were wrong.
+func TestNew_RejectsCollidingArtifactPaths(t *testing.T) {
+	tests := map[string]struct {
+		mod    func(*Config)
+		fields []string
+	}{
+		"markdown reference over the consumer's README": {
+			mod:    func(cfg *Config) { cfg.MarkdownPath = "README.md" },
+			fields: []string{"Config.MarkdownPath", "Config.READMEPath"},
+		},
+		"json artifact over the markdown reference": {
+			mod:    func(cfg *Config) { cfg.JSONPath, cfg.MarkdownPath = "docs/out", "docs/out" },
+			fields: []string{"Config.JSONPath", "Config.MarkdownPath"},
+		},
+		"README relocated onto the markdown reference": {
+			mod:    func(cfg *Config) { cfg.READMEPath = "docs/CLI.md" },
+			fields: []string{"Config.MarkdownPath", "Config.READMEPath"},
+		},
+		"json artifact over the hand-authored allowlist": {
+			mod:    func(cfg *Config) { cfg.JSONPath = "docs/cli-surface-allow.txt" },
+			fields: []string{"Config.JSONPath", "Config.AllowlistPath"},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := Config{RegenerateCommand: testRegenerateCommand}
+			test.mod(&cfg)
+
+			msg := newTestDocsError(t, cfg)
+
+			for _, field := range test.fields {
+				assert.Contains(t, msg, field, "the error must name both colliding fields")
+			}
+		})
+	}
+}
+
+// TestNew_RejectsACollisionHiddenByAnUncleanedPath is why the collision check
+// compares cleaned paths: "./docs/CLI.md" and "docs/CLI.md" are one file, and a
+// literal string comparison would let the destructive case through on a keystroke.
+func TestNew_RejectsACollisionHiddenByAnUncleanedPath(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, JSONPath: "./docs/CLI.md"})
+
+	assert.Contains(t, msg, "Config.JSONPath")
+	assert.Contains(t, msg, "Config.MarkdownPath")
+}
+
+// TestNew_StoresAnExplicitPathVerbatim locks the other half of that decision:
+// cleaning happens inside the comparison only. A path field is artifact content
+// as well as a filesystem path, so the caller's spelling survives into the
+// committed bytes.
+func TestNew_StoresAnExplicitPathVerbatim(t *testing.T) {
+	d := newTestDocs(t, func(cfg *Config) { cfg.JSONPath = "./docs/surface.json" })
+
+	assert.Equal(t, "./docs/surface.json", d.Config().JSONPath)
+}
+
+// TestNew_RejectsABackslashPathField closes a gap that only shows on POSIX:
+// filepath.ToSlash is the identity there, so both halves of the absolute-path
+// predicate are the POSIX one and a Windows-shaped path slipped through as an
+// ordinary relative name.
+func TestNew_RejectsABackslashPathField(t *testing.T) {
+	for _, value := range []string{
+		`C:\Users\me\out.json`,
+		`\\host\share\out.json`,
+		`\etc\passwd`,
+		`..\..\etc\passwd`,
+	} {
+		t.Run(value, func(t *testing.T) {
+			msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, JSONPath: value})
+
+			assert.Contains(t, msg, "Config.JSONPath")
+			assert.Contains(t, msg, "forward slashes")
+		})
+	}
+}
+
+func TestNew_RejectsABackslashLintScopeEntry(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{`cmd\internal`}})
+
+	assert.Contains(t, msg, "Config.LintedGoDirs[0]")
+	assert.Contains(t, msg, "forward slashes")
+}
+
+// TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf feeds a resolved Config
+// straight back into New, which is what a consumer wrapping this package does.
+// The opt-out must survive the round trip: were an empty slice to collapse to
+// nil anywhere along it, the second New would silently re-enable the very lint
+// scope the caller opted out of.
+func TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
+	first := newTestDocs(t, func(cfg *Config) { cfg.LintedMarkdown = []string{} }).Config()
+
+	second := newTestDocs(t, func(cfg *Config) { *cfg = first }).Config()
+
+	assert.NotNil(t, second.LintedMarkdown, "the round trip must not turn the opt-out back into a default")
+	assert.Len(t, second.LintedMarkdown, 0)
+	assert.Equal(t, first, second, "a resolved Config must be a fixed point of New")
 }

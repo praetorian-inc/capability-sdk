@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// Repository-relative defaults. They are the values brutus generated its own
-// artifacts with, so a consumer that sets only RegenerateCommand gets brutus's
-// layout. Only DocsWalkRoot is a directory; the three names below it are joined
-// onto whatever DocsWalkRoot resolves to.
+// Repository-relative defaults. They are the layout this package's original
+// consumer generated its artifacts with, so a consumer that sets only
+// RegenerateCommand gets that layout. Only DocsWalkRoot is a directory; the
+// three names below it are joined onto whatever DocsWalkRoot resolves to.
 const (
 	defaultDocsWalkRoot      = "docs"
 	defaultJSONName          = "cli-surface.json"
@@ -40,7 +40,13 @@ var regionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // Every path is repository-relative and uses forward slashes on every platform,
 // because these strings are both filesystem paths and content: they appear
 // inside the generated artifacts, which are committed and compared byte for
-// byte. A path field may not be absolute and may not contain a ".." element.
+// byte. A path may not be empty, may not be absolute, may not contain a ".."
+// element and may not contain a backslash. That holds for every entry of
+// LintedMarkdown and LintedGoDirs as well as for the scalar fields, and the
+// entry at fault is named by its index. Two of JSONPath, MarkdownPath,
+// READMEPath and AllowlistPath may not name the same file, since one artifact
+// would then overwrite another; the comparison ignores "./" and other spelling
+// differences, while the value stored is the one you wrote.
 type Config struct {
 	// RegenerateCommand is the command a developer should run to bring the
 	// generated artifacts back in sync -- for example "make cli-docs". It is
@@ -158,10 +164,14 @@ func (cfg Config) clone() Config {
 }
 
 // validate reports every problem with cfg as one joined error. It expects an
-// already-defaulted Config: the empty-value checks below are unreachable
-// through New and guard a future change to the defaulting rules instead.
+// already-defaulted Config, so the empty-value check on a scalar path or region
+// field is unreachable through New and guards a future change to the defaulting
+// rules instead. The entries of the two slice-valued path fields are a separate
+// case: defaulting replaces a nil slice wholesale and never inspects the entries
+// of one the caller supplied, so every check below reaches those entries exactly
+// as they were written -- the empty-value one included.
 func (cfg Config) validate() error {
-	return errors.Join(
+	errs := []error{
 		validateRegenerateCommand(cfg.RegenerateCommand),
 		validatePath("DocsWalkRoot", cfg.DocsWalkRoot),
 		validatePath("JSONPath", cfg.JSONPath),
@@ -170,8 +180,14 @@ func (cfg Config) validate() error {
 		validatePath("AllowlistPath", cfg.AllowlistPath),
 		validateRegion("SubcommandsRegion", cfg.SubcommandsRegion),
 		validateRegion("AliasesRegion", cfg.AliasesRegion),
+		validateDistinctRegions(cfg.SubcommandsRegion, cfg.AliasesRegion),
 		validateLintScope(cfg.LintedMarkdown, cfg.LintedGoDirs),
-	)
+	}
+	errs = append(errs, validatePathSlice("LintedMarkdown", cfg.LintedMarkdown)...)
+	errs = append(errs, validatePathSlice("LintedGoDirs", cfg.LintedGoDirs)...)
+	errs = append(errs, validateDistinctPaths(cfg)...)
+
+	return errors.Join(errs...)
 }
 
 // validateRegenerateCommand rejects a missing command. The value is checked
@@ -187,15 +203,21 @@ func validateRegenerateCommand(command string) error {
 
 // validatePath rejects a path this package must not write to or read from: an
 // empty one would target the repository root, and an absolute one or one
-// containing ".." would leave the repository the caller pointed us at. The
-// check is on the path's shape rather than on where it resolves to, since the
-// repository root is not known at construction time.
+// containing ".." would leave the repository the caller pointed us at. A
+// backslash is rejected outright, because filepath.ToSlash is the identity on
+// every non-Windows platform -- so without that case both halves of the
+// absolute-path test below are the POSIX one, and a Windows-shaped path
+// ("C:\out", "\\host\share", "\etc\passwd") passes as an ordinary
+// relative name. The check is on the path's shape rather than on where it
+// resolves to, since the repository root is not known at construction time.
 func validatePath(field, value string) error {
 	slashed := filepath.ToSlash(value)
 
 	switch {
 	case value == "":
 		return fmt.Errorf("clisurface: Config.%s must not be empty", field)
+	case strings.Contains(value, `\`):
+		return fmt.Errorf("clisurface: Config.%s must use forward slashes on every platform, got %q", field, value)
 	case filepath.IsAbs(value) || path.IsAbs(slashed):
 		return fmt.Errorf("clisurface: Config.%s must be repository-relative, got %q", field, value)
 	case slices.Contains(strings.Split(slashed, "/"), ".."):
@@ -203,6 +225,20 @@ func validatePath(field, value string) error {
 	}
 
 	return nil
+}
+
+// validatePathSlice applies the same rules to every entry of a slice-valued
+// path field, naming the entry at fault by its index so a caller with several
+// entries is told which one to fix. It returns one error per bad entry for the
+// single errors.Join in validate to collect, and a nil for every good one,
+// which that Join discards.
+func validatePathSlice(field string, values []string) []error {
+	errs := make([]error, 0, len(values))
+	for i, value := range values {
+		errs = append(errs, validatePath(fmt.Sprintf("%s[%d]", field, i), value))
+	}
+
+	return errs
 }
 
 // validateRegion rejects a region name that would not survive being
@@ -213,6 +249,61 @@ func validateRegion(field, value string) error {
 	}
 
 	return nil
+}
+
+// validateDistinctRegions rejects two regions that name one marker pair. Both
+// generated tables would then be spliced into the same block of READMEPath, so
+// whichever is written second is the only one that survives.
+func validateDistinctRegions(subcommands, aliases string) error {
+	if subcommands != aliases {
+		return nil
+	}
+
+	return fmt.Errorf("clisurface: Config.SubcommandsRegion and Config.AliasesRegion must name different regions, both are %q", subcommands)
+}
+
+// pathField pairs a path field's name with its configured value, so a
+// cross-field message can quote each side exactly as the caller wrote it.
+type pathField struct {
+	name  string
+	value string
+}
+
+// validateDistinctPaths rejects two artifact paths that name one file. It is
+// the destructive collision and it is one keystroke from a plausible config:
+// MarkdownPath "README.md" renders the whole command reference over the
+// consumer's hand-authored README, and because GeneratedPaths would then report
+// that name twice, the list to stage and the drift report both read as though
+// nothing were wrong. AllowlistPath joins the three generated paths here even
+// though generation does not write it, precisely because it is hand-authored
+// input: a generated artifact landing on it destroys it the same way.
+//
+// The comparison is on path.Clean of each value, so that "docs/CLI.md" and
+// "./docs/CLI.md" are recognised as the one file they are. Only the comparison
+// normalises: the values stay exactly as the caller wrote them -- because they
+// are artifact content as well as paths -- and the message quotes both
+// spellings, so a collision reached only through cleaning is still legible.
+func validateDistinctPaths(cfg Config) []error {
+	fields := []pathField{
+		{"JSONPath", cfg.JSONPath},
+		{"MarkdownPath", cfg.MarkdownPath},
+		{"READMEPath", cfg.READMEPath},
+		{"AllowlistPath", cfg.AllowlistPath},
+	}
+
+	var errs []error
+	firstByPath := make(map[string]pathField, len(fields))
+	for _, field := range fields {
+		cleaned := path.Clean(field.value)
+		if first, taken := firstByPath[cleaned]; taken {
+			errs = append(errs, fmt.Errorf("clisurface: Config.%s (%q) and Config.%s (%q) must name different files",
+				first.name, first.value, field.name, field.value))
+			continue
+		}
+		firstByPath[cleaned] = field
+	}
+
+	return errs
 }
 
 // validateLintScope rejects a configuration that would lint nothing. Opting one
