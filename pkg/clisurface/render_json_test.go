@@ -63,8 +63,7 @@ func TestParseJSONRoundTripsTheSurface(t *testing.T) {
 
 	assert.Equal(t, s, parsed, "the JSON artifact is a lossless copy of the surface")
 	assert.Equal(t, s.Hash(), parsed.Hash())
-	// The ported suite also asserted Diff(parsed, s) is empty here. Diff lands with
-	// diff.go in the next batch; restore that assertion when it does.
+	assert.Empty(t, Diff(parsed, s), "a round-tripped surface has no drift against itself")
 }
 
 func TestParseJSONRejectsAnUnknownSchemaVersion(t *testing.T) {
