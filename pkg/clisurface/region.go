@@ -54,7 +54,7 @@ func regionBody(doc, name string) (string, error) {
 }
 
 // regionBounds returns the offsets of the region body: begin is just after the
-// newline that endMark the opening marker line, end is the start of the closing
+// newline that ends the opening marker line, end is the start of the closing
 // marker line.
 func regionBounds(doc, name string) (begin, end int, err error) {
 	beginMark, endMark := beginMarker(name), endMarker(name)
