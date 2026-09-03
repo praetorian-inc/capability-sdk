@@ -147,6 +147,8 @@ func TestSpliceRejectsADuplicateRegionPair(t *testing.T) {
 	out, err := splice(doc, "cli-aliases", "body")
 
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), beginMarker("cli-aliases"),
+		"both markers are duplicated, so the begin-marker guard fires first and names its own marker")
 	assert.Contains(t, err.Error(), "found 2")
 	assert.Empty(t, out, "a rejected splice returns no document to write")
 }
@@ -168,6 +170,72 @@ func TestSpliceRejectsANestedRegionPair(t *testing.T) {
 	out, err := splice(doc, "cli-aliases", "body")
 
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), beginMarker("cli-aliases"),
+		"both markers are duplicated, so the begin-marker guard fires first and names its own marker")
+	assert.Contains(t, err.Error(), "found 2")
+	assert.Empty(t, out, "a rejected splice returns no document to write")
+}
+
+// TestSpliceRejectsADuplicatedBeginMarkerAlone locks the begin-marker guard on its own.
+// A README carrying two BEGIN markers and a single END would otherwise splice between the
+// first BEGIN and that single END, eating the second marker and every hand-written line
+// between them. Both markers duplicated cannot pin this: the end-marker guard alone still
+// rejects that document, so only the asymmetric case holds this guard individually.
+func TestSpliceRejectsADuplicatedBeginMarkerAlone(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Title",
+		"",
+		beginMarker("cli-aliases"),
+		"first body",
+		"",
+		"hand-written prose between the two BEGIN markers",
+		"",
+		beginMarker("cli-aliases"),
+		"second body",
+		endMarker("cli-aliases"),
+		"",
+		"hand-written tail",
+		"",
+	}, "\n")
+
+	out, err := splice(doc, "cli-aliases", "body")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), beginMarker("cli-aliases"),
+		"the rejection must name the begin marker, not merely a count")
+	assert.NotContains(t, err.Error(), endMarker("cli-aliases"),
+		"the single end marker is well-formed and must not be blamed")
+	assert.Contains(t, err.Error(), "found 2")
+	assert.Empty(t, out, "a rejected splice returns no document to write")
+}
+
+// TestSpliceRejectsADuplicatedEndMarkerAlone locks the end-marker guard on its own.
+// A single BEGIN with two ENDs would otherwise splice to the first END and leave the
+// stray second one behind as committed content. Both markers duplicated cannot pin this:
+// the begin-marker guard runs first and rejects that document before this one is reached.
+func TestSpliceRejectsADuplicatedEndMarkerAlone(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Title",
+		"",
+		beginMarker("cli-aliases"),
+		"body",
+		endMarker("cli-aliases"),
+		"",
+		"hand-written prose after the first pair",
+		"",
+		endMarker("cli-aliases"),
+		"",
+		"hand-written tail",
+		"",
+	}, "\n")
+
+	out, err := splice(doc, "cli-aliases", "body")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), endMarker("cli-aliases"),
+		"the rejection must name the end marker, not merely a count")
+	assert.NotContains(t, err.Error(), beginMarker("cli-aliases"),
+		"the single begin marker is well-formed and must not be blamed")
 	assert.Contains(t, err.Error(), "found 2")
 	assert.Empty(t, out, "a rejected splice returns no document to write")
 }
