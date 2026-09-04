@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -264,12 +265,20 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 	return issues, scope, nil
 }
 
-// lintedMarkdownFiles lists the markdown documents to check, sorted.
+// lintedMarkdownFiles lists the markdown documents to check, sorted and
+// deduplicated.
 //
 // The documentation tree is walked recursively: a document that names a removed
 // flag escapes the gate just as thoroughly from a nested directory as from the
 // top of the tree, and a check with a silent blind spot is worse than one whose
 // reach is obvious.
+//
+// Deduplication is what makes that reach safe to widen. A configured document
+// that also falls under the walk root -- a README inside the documentation
+// tree, say -- is named twice, and linting it twice would emit each of its
+// issues verbatim twice and double-count the coverage sentence. Compacting the
+// sorted list handles a duplicate from any source, rather than special-casing
+// the one overlap that is easy to picture.
 func (d *Docs) lintedMarkdownFiles(repoRoot string) ([]string, error) {
 	files := append([]string(nil), d.cfg.LintedMarkdown...)
 
@@ -293,11 +302,15 @@ func (d *Docs) lintedMarkdownFiles(repoRoot string) ([]string, error) {
 	}
 
 	sort.Strings(files)
-	return files, nil
+	return slices.Compact(files), nil
 }
 
-// lintedGoFiles lists the Go files whose comments to check, sorted, alongside
-// the directories it actually opened to find them.
+// lintedGoFiles lists the Go files whose comments to check, sorted and
+// deduplicated, alongside the directories it actually opened to find them.
+//
+// The files are compacted for the same reason the markdown documents are:
+// nothing stops a consumer configuring a directory and a directory beneath it,
+// and a file both trees contain is still one file with one set of issues.
 //
 // The directories come back beside the files because [LintRepo] reports them as
 // coverage: a scope assembled from configuration instead would name a directory
@@ -331,5 +344,5 @@ func (d *Docs) lintedGoFiles(repoRoot string) (files, dirs []string, err error) 
 		}
 	}
 	sort.Strings(files)
-	return files, dirs, nil
+	return slices.Compact(files), dirs, nil
 }

@@ -412,6 +412,53 @@ func TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere(t *testing.T) {
 		"the coverage sentence counts only the directories the walk reached")
 }
 
+// TestLintRepoLintsADocumentUnderTheWalkRootExactlyOnce pins the deduplication
+// of the markdown scope. Putting the README inside the documentation tree is a
+// legitimate layout -- it is defaults plus one natural choice -- and it puts the
+// configured document and the walk over the same file. Linting it twice emits
+// every issue in it verbatim twice and double-counts the coverage sentence.
+func TestLintRepoLintsADocumentUnderTheWalkRootExactlyOnce(t *testing.T) {
+	d := newTestDocs(t, func(c *Config) { c.READMEPath = "docs/README.md" })
+	require.Equal(t, []string{"docs/README.md"}, d.Config().LintedMarkdown,
+		"the fixture only bites while the configured document is the one the walk reaches")
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "docs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "README.md"),
+		[]byte("```bash\ntool scan --removed-flag\n```\n"), 0o644))
+
+	issues, scope, err := d.LintRepo(root, Walk(newTestTree()), emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"docs/README.md"}, scope.MarkdownFiles,
+		"a document both the configured list and the walk reach is one document")
+	require.Len(t, issues, 1,
+		"one defect in one file is one issue, not one per path that named the file")
+	assert.Equal(t, "--removed-flag", issues[0].Token)
+}
+
+// TestLintRepoLintsAGoFileUnderTwoConfiguredDirectoriesOnce is the same defect
+// on the other walk: nothing stops a consumer naming a directory and a
+// directory beneath it, and New accepts both.
+func TestLintRepoLintsAGoFileUnderTwoConfiguredDirectoriesOnce(t *testing.T) {
+	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"pkg", "pkg/lib"} })
+	root := newFakeRepo(t, d)
+	s := Walk(newTestTree())
+	require.NoError(t, d.Write(root, s))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkg", "lib"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pkg", "lib", "lib.go"),
+		[]byte("package lib\n\n// Uses the --gone-from-comments mode.\nconst A = 1\n"), 0o644))
+
+	issues, scope, err := d.LintRepo(root, s, emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"pkg/lib/lib.go"}, scope.GoFiles,
+		"a file two configured trees both contain is one file")
+	require.Len(t, issues, 1, "and its one defect is one issue")
+	assert.Equal(t, "--gone-from-comments", issues[0].Token)
+}
+
 func TestLoadAllowlist(t *testing.T) {
 	d := newTestDocs(t)
 	root := t.TempDir()
