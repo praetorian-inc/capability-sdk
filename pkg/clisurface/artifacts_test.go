@@ -667,7 +667,9 @@ func TestArtifactGateReddens(t *testing.T) {
 
 	t.Run("the committed artifacts go stale with the tree", func(t *testing.T) {
 		live := newTestTree()
-		mustCommand(t, live, "scan").Flags().Lookup("target").Name = "targe"
+		renamed := mustCommand(t, live, "scan").Flags().Lookup("target")
+		require.NotNil(t, renamed, "the fixture tree must still carry the flag this test renames")
+		renamed.Name = "targe"
 
 		stale, err := d.CheckArtifacts(root, Walk(live))
 		require.NoError(t, err)
@@ -675,11 +677,22 @@ func TestArtifactGateReddens(t *testing.T) {
 		assert.Contains(t, stale[0].String(), "Regenerate it with '"+testRegenerateCommand+"'")
 	})
 
+	// The lint half goes through LintRepo rather than LintMarkdown: LintRepo is
+	// the entry point a consumer's gate calls, and it is the one that decides
+	// which files get read at all. Handing LintMarkdown a string proves the
+	// message is right about a document the test already chose; planting the
+	// document and letting the walk find it proves the gate would have found it.
 	t.Run("a document naming a removed flag names the configured allowlist", func(t *testing.T) {
-		issues := d.LintMarkdown(documented, "docs/guide.md",
-			"```bash\ntool scan --removed-flag\n```\n", emptyAllowlist(t))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "guide.md"),
+			[]byte("```bash\ntool scan --removed-flag\n```\n"), 0o644))
 
-		require.Len(t, issues, 1)
+		issues, scope, err := d.LintRepo(root, documented, emptyAllowlist(t))
+		require.NoError(t, err)
+
+		require.Contains(t, scope.MarkdownFiles, "docs/guide.md",
+			"the walk has to reach the planted document, or the assertions below prove nothing")
+		require.Len(t, issues, 1, "the planted document is the only defect in the committed tree")
+		assert.Equal(t, "docs/guide.md", issues[0].File)
 		assert.Contains(t, issues[0].String(), allowlistPath,
 			"the advice names this Docs's allowlist, not a package-level default")
 		assert.NotContains(t, issues[0].String(), defaultAllowlistName)
