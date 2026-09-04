@@ -131,6 +131,18 @@ type Flag struct {
 // the same command tree -- Walk leaves the observable tree unchanged, but the
 // guards it invokes are consumer code running against a live tree another
 // goroutine may be executing.
+//
+// Three further obligations are on the guard, because Walk cannot enforce any
+// of them. A probed guard must return: one that blocks -- on a lock, a read, a
+// network call -- wedges Walk with no context, no deadline and nothing to
+// cancel. It must not call os.Exit: the calling process dies mid-walk with the
+// guard's own status, which in a drift gate reads as an unexplained failure of
+// the gate. And it must not call runtime.Goexit, which unwinds past the probe
+// and out of the caller's goroutine. The deferred recover around a probe covers
+// a panic and nothing else; none of these three is one. A timeout here would
+// not help either: it needs a goroutine per probe and still cannot reclaim one
+// that has wedged, so the obligation stays where it can actually be met, with
+// the guard.
 func Walk(root *cobra.Command) Surface {
 	var s Surface
 	collect(root, root, &s)

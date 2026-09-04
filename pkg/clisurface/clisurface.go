@@ -57,7 +57,8 @@
 // Two tests lock the two halves, each over the surface it actually covers --
 // TestRenderRegionsSkipsHiddenSubcommands over the rendered README subcommand
 // region, and TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands over the
-// markdown reference -- so a change to either half fails loudly rather than
+// markdown reference, whose cases between them reach every annotation a command
+// or a flag can carry -- so a change to either half fails loudly rather than
 // quietly editing what the artifacts disclose.
 //
 // # Flag defaults are published verbatim
@@ -86,9 +87,24 @@
 // Every path in a Config is repository-relative, and the library writes to and
 // overwrites the paths it is given. Validation rejects an absolute path and one
 // containing a ".." element, which catches a mistake -- it is not a sandbox and
-// is not a defence against a hostile configuration. This is a code generator
-// invoked by the repository it generates into: whoever supplies the Config
-// already controls the source tree.
+// is not a defence against a hostile configuration. Nor could it be: it rules on
+// the shape of a string, while the filesystem decides where that string leads.
+// A symlink anywhere along an entirely valid path puts the write or the read
+// outside the repository, and no amount of checking the string can see that.
+// Write refuses a target that already exists as something other than a regular
+// file, and the lint walks read regular files only, precisely because those two
+// operations are where the consequence lands -- but they are narrow guards on
+// two operations, not containment. This is a code generator invoked by the
+// repository it generates into: whoever supplies the Config already controls
+// the source tree.
+//
+// The command tree is trusted on the same terms. Walk recurses over it with no
+// visited set, so a tree containing a cycle -- a is a child of b and b a child
+// of a, which cobra allows because it rejects only self-addition -- recurses
+// until the stack limit and takes the process down with a fatal stack overflow.
+// That is not a panic, and no deferred recover can reach it. A cobra tree is
+// the consumer's own code and a cycle in one is a construction bug in that
+// code, so Walk does not carry a visited set on every node to detect it.
 //
 // Writes are in place and not atomic. A failure partway through can leave an
 // artifact half-written, so run generation from a clean working tree and review
@@ -97,13 +113,15 @@
 //
 // # Concurrency
 //
-// Walk is single-goroutine-per-tree, and the values it returns ([Surface],
-// [Command], [Flag], [Allowlist]) are safe to share read-only -- including
-// concurrent Hash, Diff, LintMarkdown and CheckArtifacts on the same value,
-// provided no one mutates the Surface after handing it over. A Docs is
+// Walk is single-goroutine-per-tree, and the [Surface] it returns -- with the
+// [Command] and [Flag] values inside it -- is safe to share read-only,
+// including concurrent Hash, Diff, LintMarkdown and CheckArtifacts on the same
+// value, provided no one mutates the Surface after handing it over. A Docs is
 // read-only once New returns it, so its checking methods may be called
 // concurrently; its generating methods write files and must not race each other
-// over the same paths.
+// over the same paths. An [Allowlist] is shareable on the same terms, and
+// [Allowlist.Entries] builds a fresh slice on every call, so no two readers of
+// one allowlist can reach the same backing array.
 //
 // # Notes for maintainers
 //
@@ -112,8 +130,10 @@
 // do not pin, so a cobra upgrade can legitimately change generated output.
 //
 // Two house conventions are set aside deliberately. Errors that report a
-// rejected configuration are built with fmt.Errorf and no %w verb, because
-// there is no underlying cause to unwrap; %w is used where a real cause exists.
+// rejected configuration carry no %w verb -- errors.New where the message has
+// nothing to interpolate, fmt.Errorf where it quotes the offending value --
+// because there is no underlying cause to unwrap; %w is used where a real cause
+// exists.
 // And the tests are in package clisurface rather than clisurface_test, because
 // the ported suite exercises unexported helpers directly and stamps unexported
 // fields on the values it asserts against.

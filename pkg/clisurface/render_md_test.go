@@ -44,17 +44,69 @@ func TestRenderMarkdownSeparatesLocalInheritedAndRejectedFlags(t *testing.T) {
 		"a rejected flag appears only in the rejected table, never as a usable option")
 }
 
+// TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands covers every
+// annotation the markdown reference can emit for a hidden or deprecated
+// command, and for a hidden or deprecated flag.
+//
+// The fixture tree's "old" command is hidden *and* deprecated, so it exercises
+// the deprecated arm and can never reach the hidden one -- which is why the
+// cases below hand-build a Surface instead. Between them the two annotation
+// helpers have no unreached branch left, which is what lets the package doc
+// claim that a change to either half fails loudly.
 func TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands(t *testing.T) {
 	d := newTestDocs(t)
-	s := Walk(newTestTree())
 
-	md := string(d.renderMarkdown(s))
-	old := section(t, md, "tool group old")
+	t.Run("a command that is both hidden and deprecated", func(t *testing.T) {
+		md := string(d.renderMarkdown(Walk(newTestTree())))
+		old := section(t, md, "tool group old")
 
-	assert.Contains(t, old, "- Hidden: not shown in `--help` output")
-	assert.Contains(t, old, `- Deprecated: use "tool group leaf" instead`)
-	assert.Contains(t, md, "the old spelling (deprecated:", "the index flags it too")
-	assert.Contains(t, section(t, md, "tool group"), "- Requires a subcommand")
+		assert.Contains(t, old, "- Hidden: not shown in `--help` output")
+		assert.Contains(t, old, `- Deprecated: use "tool group leaf" instead`)
+		assert.Contains(t, md, "the old spelling (deprecated:", "the index flags it too")
+		assert.Contains(t, section(t, md, "tool group"), "- Requires a subcommand")
+
+		index := indexRow(t, md, "tool group old")
+		assert.Contains(t, index, "(deprecated:")
+		assert.NotContains(t, index, "(hidden)",
+			"the index annotation is one slot and deprecation takes it; the body says both")
+	})
+
+	t.Run("a command that is hidden and not deprecated", func(t *testing.T) {
+		md := string(d.renderMarkdown(Surface{Commands: []Command{
+			{Path: "tool", Use: "tool", Short: "the tool"},
+			{Path: "tool ghost", Use: "ghost", Short: "an internal escape hatch", Runnable: true, Hidden: true},
+		}}))
+
+		assert.Contains(t, indexRow(t, md, "tool ghost"), "an internal escape hatch (hidden)")
+	})
+
+	t.Run("a hidden flag and a deprecated flag", func(t *testing.T) {
+		md := string(d.renderMarkdown(Surface{Commands: []Command{{
+			Path: "tool", Use: "tool", Short: "the tool", Runnable: true,
+			Flags: []Flag{
+				{Name: "internal", Type: "bool", Usage: "an internal switch", Hidden: true},
+				{Name: "legacy", Type: "string", Usage: "the old spelling", Deprecated: "use --modern"},
+			},
+		}}}))
+
+		assert.Contains(t, md, "an internal switch (hidden)")
+		assert.Contains(t, md, "the old spelling (deprecated: use --modern)")
+	})
+}
+
+// indexRow returns the command-index table row for path, so an assertion about
+// the index annotation cannot accidentally be satisfied by the command's own
+// section further down the document.
+func indexRow(t *testing.T, md, path string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(md, "\n") {
+		if strings.HasPrefix(line, "| ["+code(path)+"]") {
+			return line
+		}
+	}
+	require.FailNow(t, "no command index row for "+path)
+	return ""
 }
 
 func TestRenderMarkdownIncludesDedentedExamples(t *testing.T) {
