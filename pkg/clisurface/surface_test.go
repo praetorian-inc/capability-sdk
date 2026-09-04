@@ -491,17 +491,86 @@ func TestWalkKeepsALegitimateNestedHelpCommand(t *testing.T) {
 		"only the root's own injected help/completion are excluded")
 }
 
-// TestWalkStillExcludesCobrasRootBuiltins is the other half: the root-level filter has
-// to keep working, or the surface depends on whether something executed the tree.
-func TestWalkStillExcludesCobrasRootBuiltins(t *testing.T) {
+// TestWalkKeepsConsumerDeclaredRootHelpAndCompletion is the case a name-only
+// filter got exactly backwards. A drift gate walks the tree without executing
+// it, and cobra injects during Execute -- so at Walk time a root-level "help" or
+// "completion" is normally the consumer's own command. Dropping it by name took
+// the gate off two real commands and turned their flags into vocabulary the doc
+// linter did not recognise.
+func TestWalkKeepsConsumerDeclaredRootHelpAndCompletion(t *testing.T) {
 	root := newTestTree()
-	root.AddCommand(&cobra.Command{Use: "help", RunE: func(*cobra.Command, []string) error { return nil }})
-	root.AddCommand(&cobra.Command{Use: "completion", RunE: func(*cobra.Command, []string) error { return nil }})
+	handbook := &cobra.Command{Use: "help [topic]", Short: "show the operator handbook", RunE: func(*cobra.Command, []string) error { return nil }}
+	handbook.Flags().Bool("full", false, "include the appendices")
+	root.AddCommand(handbook)
+	shell := &cobra.Command{Use: "completion", Short: "print our own shell integration", RunE: func(*cobra.Command, []string) error { return nil }}
+	shell.Flags().String("shell", "bash", "which shell to emit the integration for")
+	root.AddCommand(shell)
 
-	for _, c := range Walk(root).Commands {
-		assert.NotEqual(t, "tool help", c.Path)
-		assert.NotEqual(t, "tool completion", c.Path)
+	s := Walk(root)
+
+	help, ok := s.Command("tool help")
+	require.True(t, ok, "a root help command the consumer declared belongs to the surface")
+	assert.Equal(t, "show the operator handbook", help.Short)
+	_, ok = help.Flag("full")
+	assert.True(t, ok, "and so do its own flags")
+
+	completion, ok := s.Command("tool completion")
+	require.True(t, ok, "so does a root completion command the consumer declared")
+	assert.Equal(t, "print our own shell integration", completion.Short)
+	_, ok = completion.Flag("shell")
+	assert.True(t, ok)
+}
+
+// TestWalkKeepsARootHelpCommandThatOnlyLooksLikeCobras closes the gap a
+// signature match on its own would leave. The deciding evidence is that cobra
+// registered the command as the tree's help command, not that its Use and Short
+// happen to read like cobra's -- a consumer who copied those lines still wrote
+// the command.
+func TestWalkKeepsARootHelpCommandThatOnlyLooksLikeCobras(t *testing.T) {
+	root := newTestTree()
+	root.AddCommand(&cobra.Command{
+		Use:   cobraHelpUse,
+		Short: cobraHelpShort,
+		RunE:  func(*cobra.Command, []string) error { return nil },
+	})
+
+	_, ok := Walk(root).Command("tool help")
+
+	assert.True(t, ok, "a command cobra never registered as the tree's help command is the consumer's own")
+}
+
+// TestWalkStillExcludesCobrasInjectedBuiltinsBesideTheConsumersOwn is the other
+// half: the root-level filter has to keep working, or the surface depends on
+// whether something executed the tree. Both interplays are here.
+// InitDefaultHelpCmd checks only its own unexported slot, never whether a child
+// is already named "help", so an Execute leaves the tree carrying both commands
+// and the surface must keep the consumer's and drop cobra's.
+// InitDefaultCompletionCmd is the opposite: it declines to inject at all once
+// the tree declares a "completion" command, which is why a signature match there
+// can never be shadowing a consumer's.
+func TestWalkStillExcludesCobrasInjectedBuiltinsBesideTheConsumersOwn(t *testing.T) {
+	root := newTestTree()
+	root.AddCommand(&cobra.Command{Use: "help", Short: "show the operator handbook", RunE: func(*cobra.Command, []string) error { return nil }})
+	root.AddCommand(&cobra.Command{Use: "completion", Short: "print our own shell integration", RunE: func(*cobra.Command, []string) error { return nil }})
+	// What Execute does to the tree.
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+
+	s := Walk(root)
+
+	var help, completion []Command
+	for _, c := range s.Commands {
+		switch c.Path {
+		case "tool help":
+			help = append(help, c)
+		case "tool completion":
+			completion = append(completion, c)
+		}
 	}
+	require.Len(t, help, 1, "cobra's injected help command must not join the consumer's in the surface")
+	assert.Equal(t, "show the operator handbook", help[0].Short, "and the one that survives is the consumer's")
+	require.Len(t, completion, 1)
+	assert.Equal(t, "print our own shell integration", completion[0].Short)
 }
 
 // TestWalkReportsAShadowingFlagAsTheCommandsOwn pins classification by flag identity.

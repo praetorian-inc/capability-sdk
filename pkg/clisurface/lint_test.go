@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -171,6 +172,24 @@ func TestLintMarkdownResolvesSubcommandsAndAliases(t *testing.T) {
 	assert.Equal(t, "leef", issues[0].Token)
 	assert.Contains(t, issues[0].Reason, "is not a subcommand of")
 	assert.Equal(t, "leaf", issues[0].Suggestion)
+}
+
+// TestLintMarkdownResolvesAConsumerDeclaredCompletionCommand is the downstream
+// cost of dropping a root-level command from the surface by name. The linter
+// resolves every documented invocation against the surface, so a command missing
+// from it turns each documented use into an unknown-subcommand issue and each of
+// its flags into an unknown flag -- the gate reporting drift against a command
+// that is not actually drifting.
+func TestLintMarkdownResolvesAConsumerDeclaredCompletionCommand(t *testing.T) {
+	d := newTestDocs(t)
+	root := newTestTree()
+	shell := &cobra.Command{Use: "completion", Short: "print our own shell integration", RunE: func(*cobra.Command, []string) error { return nil }}
+	shell.Flags().String("shell", "bash", "which shell to emit the integration for")
+	root.AddCommand(shell)
+	s := Walk(root)
+
+	assert.Empty(t, d.LintMarkdown(s, "README.md", "```bash\ntool completion --shell zsh\n```", emptyAllowlist(t)),
+		"a command the consumer declared must resolve, and its own flags with it")
 }
 
 func TestLintMarkdownTreatsPositionalArgumentsAsValues(t *testing.T) {

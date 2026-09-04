@@ -21,9 +21,13 @@
 // # What is documented, and what is not
 //
 // The split is per artifact, not per command class. [Walk] drops only the help
-// and shell-completion commands cobra injects into a tree itself; every command
-// the consumer declares reaches the [Surface] whatever its hidden or deprecated
-// state, and each artifact then applies its own population rule. Read those
+// and shell-completion commands cobra injects into a tree itself, recognising
+// them by provenance rather than by name; every command the consumer declares
+// reaches the [Surface] whatever its hidden or deprecated state, the sole
+// exception being cobra's two reserved completion-protocol names
+// (cobra.ShellCompRequestCmd and cobra.ShellCompNoDescRequestCmd), which are
+// never documentation whoever declared them. Each artifact then applies its own
+// population rule. Read those
 // rules per artifact rather than per class: a command can be hidden,
 // deprecated, both or neither, and the artifacts do not agree on what to do
 // with the both case.

@@ -16,21 +16,30 @@ import (
 // shape of the rendered JSON changes in a way consumers must notice.
 const schemaVersion = 1
 
-// builtinCommands are the commands cobra injects into a tree on the first Execute
-// (InitDefaultHelpCmd / InitDefaultCompletionCmd / initCompleteCmd). They are not part
-// of the surface this package documents, and whether they are present depends on whether
-// something already executed the tree in this process — so excluding them keeps the
-// walk deterministic regardless of test ordering.
+// The commands cobra injects into a tree on the first Execute
+// (InitDefaultHelpCmd / InitDefaultCompletionCmd / initCompleteCmd) are not part
+// of the surface this package documents, and whether they are present depends on
+// whether something already executed the tree in this process — so excluding
+// them keeps the walk deterministic regardless of test ordering.
 //
-// cobra only ever injects them as direct children of the root, and collect only skips
-// them there: filtering by name at every depth would silently drop a legitimate
-// subcommand called "help" along with its own children.
-var builtinCommands = map[string]bool{
-	"help":                          true,
-	"completion":                    true,
-	cobra.ShellCompRequestCmd:       true,
-	cobra.ShellCompNoDescRequestCmd: true,
-}
+// These are the names cobra gives them. A name is where the recognition starts,
+// never where it ends: see cobraInjected.
+const (
+	helpCommandName       = "help"
+	completionCommandName = "completion"
+)
+
+// The Use and Short lines cobra gives the two injected commands a consumer could
+// plausibly also want to declare. Recognition compares against them verbatim, so
+// they are cobra's strings and not this package's wording; if a cobra release
+// changes either one, recognition fails and the command is documented rather
+// than dropped, which is the direction this package wants to fail in.
+const (
+	cobraHelpUse         = helpCommandName + " [command]"
+	cobraHelpShort       = "Help about any command"
+	cobraCompletionUse   = completionCommandName
+	cobraCompletionShort = "Generate the autocompletion script for the specified shell"
+)
 
 // HelpFlag is the flag cobra injects into every command on the first Execute
 // (InitDefaultHelpFlag). Like the built-in commands it is excluded from the
@@ -150,10 +159,13 @@ func Walk(root *cobra.Command) Surface {
 	return s
 }
 
-// collect appends cmd and its descendants to s, skipping the built-ins cobra injects
-// as direct children of root.
+// collect appends cmd and its descendants to s, skipping the commands cobra
+// injects into the tree itself as direct children of root. cobra only ever
+// injects them there, and collect only skips them there: filtering at every
+// depth would drop a legitimate subcommand called "help" along with its own
+// children.
 func collect(cmd, root *cobra.Command, s *Surface) {
-	if cmd.Parent() == root && builtinCommands[cmd.Name()] {
+	if cmd.Parent() == root && cobraInjected(cmd) {
 		return
 	}
 
@@ -163,6 +175,59 @@ func collect(cmd, root *cobra.Command, s *Surface) {
 	for i := range children {
 		collect(children[i], root, s)
 	}
+}
+
+// cobraInjected reports whether cmd is a command cobra added to the tree itself
+// rather than one the consumer declared.
+//
+// Provenance decides, not the name. A drift gate calls Walk without executing
+// the tree, and cobra injects during Execute — so at Walk time a root-level
+// "help" or "completion" is usually the consumer's own command, and a name-only
+// test excluded exactly the commands this package exists to document while
+// missing the injected ones it was written to drop.
+//
+// Every branch defaults to including the command, because the two errors are not
+// symmetric. Documenting a command cobra injected is visible in the artifact
+// diff and harmless. Silently dropping one the consumer declared is invisible:
+// the command vanishes from the JSON artifact, from the generated reference and
+// from lint resolution, so the gate quietly stops covering a real command and
+// its flags become unrecognised vocabulary.
+func cobraInjected(cmd *cobra.Command) bool {
+	switch cmd.Name() {
+	case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		// cobra's completion wire protocol. Unlike the two below, these names
+		// are not something a consumer reaches for: cobra exports them as
+		// constants so they are never spelled by hand, they carry no
+		// documentation (initCompleteCmd marks its command Hidden), and cobra
+		// adds its own on every Execute whatever the tree already holds, so a
+		// command under either name cannot displace the protocol's. The name is
+		// the whole test here.
+		return true
+	case helpCommandName:
+		return cmd.Use == cobraHelpUse && cmd.Short == cobraHelpShort && occupiesCobrasHelpSlot(cmd)
+	case completionCommandName:
+		// cobra's completion command groups the per-shell generators and runs
+		// nothing itself, and InitDefaultCompletionCmd skips injection entirely
+		// when the tree already declares a "completion" command — so a match
+		// here cannot be shadowing a consumer's own.
+		return cmd.Use == cobraCompletionUse && cmd.Short == cobraCompletionShort && !cmd.Runnable()
+	}
+	return false
+}
+
+// occupiesCobrasHelpSlot reports whether cmd is the command cobra runs for
+// "help", which is to say whether its parent's unexported helpCommand field
+// points at cmd.
+//
+// cobra exposes no getter for that field, but IsAvailableCommand consults it:
+// for a runnable, visible, undeprecated command every other branch of that
+// method returns true, so a false answer means the parent's helpCommand is this
+// command. Reading it this way keeps Walk's no-mutation guarantee — calling
+// InitDefaultHelpCmd to find out would inject the very command being identified.
+//
+// cmd must have a parent; collect only tests root's children.
+func occupiesCobrasHelpSlot(cmd *cobra.Command) bool {
+	return cmd.Runnable() && !cmd.Hidden && cmd.Deprecated == "" && !cmd.IsAvailableCommand()
 }
 
 // describe snapshots a single command.
