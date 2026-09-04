@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/praetorian-inc/capability-sdk/pkg/formatter"
 	"github.com/stretchr/testify/assert"
@@ -71,36 +72,63 @@ func TestAggregator_ConcurrentSubmits(t *testing.T) {
 	assert.Len(t, lines, numGoroutines*findingsPerGoroutine)
 }
 
+// aggregatorWaitTimeout bounds every wait in the cancellation test. The events
+// waited on are microseconds apart in a healthy build, so a multi-second bound
+// only fires on an aggregator regression, never because the machine is loaded.
+const aggregatorWaitTimeout = 10 * time.Second
+
 func TestAggregator_ContextCancellation(t *testing.T) {
-	f := &blockingFormatter{
-		started: make(chan struct{}),
-		release: make(chan struct{}),
-	}
+	f := newBlockingFormatter()
+	agg := formatter.NewAggregator(f, 1)
+
+	// Registered as soon as agg exists so that a failing require below cannot
+	// skip it and leave the worker blocked on a channel nobody closes.
+	// Releasing before closing lets the worker drain and exit, where closing
+	// first would deadlock Close's wg.Wait against the parked Format.
 	t.Cleanup(func() {
-		select {
-		case <-f.release:
-		default:
-			close(f.release)
-		}
+		f.releaseAll()
+		_ = agg.Close()
 	})
 
-	agg := formatter.NewAggregator(f, 1)
+	// The worker dequeues this finding and parks inside Format...
 	require.NoError(t, agg.Submit(context.Background(), formatter.Finding{ID: "processing"}))
-	<-f.started
+	waitFor(t, f.started, "the formatter to enter Format")
+
+	// ...so this one fills the buffer the worker has stopped draining, leaving
+	// the queue full and any further Submit unable to send.
 	require.NoError(t, agg.Submit(context.Background(), formatter.Finding{ID: "queued"}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	assert.ErrorIs(t, agg.Submit(ctx, formatter.Finding{ID: "cancelled"}), context.Canceled)
+}
 
-	close(f.release)
-	require.NoError(t, agg.Close())
+// waitFor bounds a receive that should already be imminent, so an aggregator
+// that never gets there fails with a diagnostic instead of hanging until the
+// package test timeout.
+func waitFor(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+
+	select {
+	case <-ch:
+	case <-time.After(aggregatorWaitTimeout):
+		t.Fatalf("timed out after %s waiting for %s", aggregatorWaitTimeout, what)
+	}
 }
 
 type blockingFormatter struct {
 	started chan struct{}
 	release chan struct{}
-	once    sync.Once
+
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func newBlockingFormatter() *blockingFormatter {
+	return &blockingFormatter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
 }
 
 func (f *blockingFormatter) Initialize(context.Context, formatter.ToolInfo) error { return nil }
@@ -108,9 +136,17 @@ func (f *blockingFormatter) Complete(context.Context, formatter.Summary) error  
 func (f *blockingFormatter) Close() error                                         { return nil }
 
 func (f *blockingFormatter) Format(context.Context, formatter.Finding) error {
-	f.once.Do(func() { close(f.started) })
+	f.startedOnce.Do(func() { close(f.started) })
+	// Deliberately unbounded: parking here is what keeps the aggregator's queue
+	// full, and t.Fatal is illegal off the test goroutine. Cleanup always calls
+	// releaseAll, so this receive cannot outlive the test.
 	<-f.release
 	return nil
+}
+
+// releaseAll unblocks every Format call. Safe to call more than once.
+func (f *blockingFormatter) releaseAll() {
+	f.releaseOnce.Do(func() { close(f.release) })
 }
 
 func TestAggregator_SubmitAfterClose(t *testing.T) {
