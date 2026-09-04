@@ -698,3 +698,144 @@ func TestArtifactGateReddens(t *testing.T) {
 		assert.NotContains(t, issues[0].String(), defaultAllowlistName)
 	})
 }
+
+// TestLintRepoSkipsANonRegularMarkdownEntry pins the rule that only regular
+// files are read. filepath.WalkDir selects by lstat, so a symlink named
+// "notes.md" satisfies the suffix test; the whole-file read that follows does
+// not lstat anything and follows it wherever it points. Pointed at /dev/zero
+// that read has no bound at all -- measured at 56 GB of live heap and still
+// climbing -- and pointed at a FIFO it never returns. Either is reachable from
+// a docs-only pull request, so the gate must select the entry, not the name.
+//
+// A regular file outside the repository stands in for the unbounded device
+// here, because it makes the same point -- the read followed the link out of
+// the tree -- while remaining a test that terminates.
+func TestLintRepoSkipsANonRegularMarkdownEntry(t *testing.T) {
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	require.NoError(t, os.WriteFile(outside, []byte("```bash\ntool scan --removed-flag\n```\n"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "docs", "notes.md")))
+
+	issues, scope, err := d.LintRepo(root, Walk(newTestTree()), emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.NotContains(t, scope.MarkdownFiles, "docs/notes.md", "a symlink is not a regular file, so it is not read")
+	assert.Empty(t, issues, "nothing outside the repository was read")
+	assert.Contains(t, scope.SkippedIrregular, "docs/notes.md", "the skip is reported, never silent")
+}
+
+// TestLintRepoSkipsANonRegularGoEntry is the Go half of the same rule. The two
+// walks are separate closures, so a fix to one proves nothing about the other.
+func TestLintRepoSkipsANonRegularGoEntry(t *testing.T) {
+	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"internal"} })
+	root := newFakeRepo(t, d)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "internal"), 0o755))
+	outside := filepath.Join(t.TempDir(), "outside.go")
+	require.NoError(t, os.WriteFile(outside, []byte("package x\n\n// Run passes --removed-flag to the scanner.\nfunc Run() {}\n"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "internal", "x.go")))
+
+	issues, scope, err := d.LintRepo(root, Walk(newTestTree()), emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.Empty(t, scope.GoFiles, "a symlink is not a regular file, so it is not read")
+	assert.Empty(t, issues, "nothing outside the repository was read")
+	assert.Contains(t, scope.SkippedIrregular, "internal/x.go", "the skip is reported, never silent")
+}
+
+// TestLintRepoTreatsASymlinkedGoRootAsAbsent pins the difference between the
+// two things a scope can say about a directory. os.Stat follows a symlink, so a
+// symlinked root passed the existence gate and was appended to GoDirs; WalkDir
+// then lstatted it, saw a non-directory, and walked nothing. The report read
+// "1 Go file(s) under 1 Go dir(s) [internal]" while linting zero files, which
+// is the exact silence LintScope exists to break.
+func TestLintRepoTreatsASymlinkedGoRootAsAbsent(t *testing.T) {
+	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"internal"} })
+	root := newFakeRepo(t, d)
+	elsewhere := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(elsewhere, "x.go"),
+		[]byte("package x\n\n// Run passes --removed-flag to the scanner.\nfunc Run() {}\n"), 0o644))
+	require.NoError(t, os.Symlink(elsewhere, filepath.Join(root, "internal")))
+
+	issues, scope, err := d.LintRepo(root, Walk(newTestTree()), emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.NotContains(t, scope.GoDirs, "internal", "a symlinked root is never reported as covered")
+	assert.Empty(t, scope.GoFiles)
+	assert.Empty(t, issues)
+	assert.Contains(t, scope.SkippedIrregular, "internal", "absent-by-symlink is louder than absent")
+}
+
+// TestLintRepoCompactsADuplicatedGoDirectory pins C3. Nothing rejects a repeated
+// entry in LintedGoDirs, and the repeat reached the coverage sentence as
+// "under 2 Go dir(s) [pkg, pkg]" -- a count of configuration, where the whole
+// contract of LintScope is that it counts what was walked.
+func TestLintRepoCompactsADuplicatedGoDirectory(t *testing.T) {
+	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"pkg", "pkg"} })
+	root := newFakeRepo(t, d)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pkg", "x.go"), []byte("package pkg\n"), 0o644))
+
+	_, scope, err := d.LintRepo(root, Walk(newTestTree()), emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"pkg"}, scope.GoDirs)
+	assert.Equal(t, []string{"pkg/x.go"}, scope.GoFiles)
+	assert.Contains(t, LintReport(nil, scope), "under 1 Go dir(s) [pkg]")
+}
+
+// TestWriteRefusesToFollowASymlinkedArtifact pins S2. validatePath rules on the
+// shape of a string; the escape is in the filesystem. With docs/CLI.md a
+// symlink into another tree, Write returned nil and overwrote the file it
+// pointed at -- mode preserved, so the overwrite left no fingerprint. The
+// refusal has to be a returned error rather than a skip, because a silent skip
+// would leave CheckArtifacts reporting drift no regeneration could clear.
+func TestWriteRefusesToFollowASymlinkedArtifact(t *testing.T) {
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	victim := filepath.Join(t.TempDir(), "victim.md")
+	require.NoError(t, os.WriteFile(victim, []byte("private\n"), 0o600))
+	require.NoError(t, os.Symlink(victim, filepath.Join(root, d.Config().MarkdownPath)))
+
+	err := d.Write(root, Walk(newTestTree()))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), d.Config().MarkdownPath, "the message names the artifact at fault")
+	assert.Contains(t, err.Error(), "not a regular file")
+
+	content, readErr := os.ReadFile(victim)
+	require.NoError(t, readErr)
+	assert.Equal(t, "private\n", string(content), "the file the symlink pointed at is untouched")
+}
+
+// TestFindRepoRootRequiresARegularGoMod pins S11. os.Stat reports neither type
+// nor follow-status, so either decoy below selects a root the caller did not
+// mean -- and the root decides where every artifact is written and which trees
+// are linted, so choosing it wrongly relocates the whole run.
+func TestFindRepoRootRequiresARegularGoMod(t *testing.T) {
+	t.Run("a directory named go.mod is not a module root", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/real\n"), 0o644))
+		decoy := filepath.Join(root, "decoy")
+		require.NoError(t, os.MkdirAll(filepath.Join(decoy, "go.mod"), 0o755))
+
+		found, err := FindRepoRoot(decoy)
+
+		require.NoError(t, err)
+		assert.Equal(t, root, found, "the search walks past the decoy to the real module root")
+	})
+
+	t.Run("a symlinked go.mod is not a module root", func(t *testing.T) {
+		root := t.TempDir()
+		realMod := filepath.Join(root, "go.mod")
+		require.NoError(t, os.WriteFile(realMod, []byte("module example.com/real\n"), 0o644))
+		decoy := filepath.Join(root, "decoy")
+		require.NoError(t, os.MkdirAll(decoy, 0o755))
+		require.NoError(t, os.Symlink(realMod, filepath.Join(decoy, "go.mod")))
+
+		found, err := FindRepoRoot(decoy)
+
+		require.NoError(t, err)
+		assert.Equal(t, root, found, "the search walks past the decoy to the real module root")
+	})
+}

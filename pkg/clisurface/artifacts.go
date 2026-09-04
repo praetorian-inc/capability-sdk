@@ -20,13 +20,19 @@ import (
 // It takes no [Docs] receiver because it reads no configuration: where a module
 // begins is a property of the checkout, not of how a caller configured its
 // documentation.
+//
+// Only a regular go.mod counts. os.Stat would report neither the entry's type
+// nor whether it is a symlink, so a directory named go.mod, or one symlinked out
+// of the tree, would win over the real module root above it -- and the root this
+// returns decides where every artifact is written and which trees are linted, so
+// choosing it wrongly relocates the entire run rather than failing.
 func FindRepoRoot(start string) (string, error) {
 	dir, err := filepath.Abs(start)
 	if err != nil {
 		return "", fmt.Errorf("resolving %s: %w", start, err)
 	}
 	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+		if info, statErr := os.Lstat(filepath.Join(dir, "go.mod")); statErr == nil && info.Mode().IsRegular() {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
@@ -82,6 +88,18 @@ func (d *Docs) artifacts(repoRoot string, s Surface) ([]artifact, error) {
 
 // Write writes every generated artifact. This is the update path; the drift
 // gate itself must never call it.
+//
+// An artifact path that already exists as something other than a regular file
+// is refused rather than written through. [Config] validates the shape of a
+// path, but a shape cannot express where a path resolves to: with the
+// repository's own docs/CLI.md replaced by a symlink, an ordinary regeneration
+// would overwrite whatever it pointed at -- outside the repository, at the
+// target's own mode, leaving nothing behind to notice. os.Lstat is the portable
+// way to see that; syscall.O_NOFOLLOW is not available on Windows.
+//
+// The refusal is a returned error and never a skip. A skipped artifact would
+// leave [Docs.CheckArtifacts] reporting drift that no correct regeneration
+// could ever clear, which is the same unrecoverable red gate by a quieter route.
 func (d *Docs) Write(repoRoot string, s Surface) error {
 	artifacts, err := d.artifacts(repoRoot, s)
 	if err != nil {
@@ -91,6 +109,9 @@ func (d *Docs) Write(repoRoot string, s Surface) error {
 		path := filepath.Join(repoRoot, artifacts[i].Path)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("creating directory for %s: %w", artifacts[i].Path, err)
+		}
+		if info, lstatErr := os.Lstat(path); lstatErr == nil && !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to write %s: it already exists and is not a regular file", artifacts[i].Path)
 		}
 		if err := os.WriteFile(path, artifacts[i].Content, 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", artifacts[i].Path, err)
@@ -208,9 +229,10 @@ func (d *Docs) LoadAllowlist(repoRoot string) (Allowlist, error) {
 //
 // The returned [LintScope] is what the walk actually reached, not what was
 // configured. The two differ whenever a configured directory is missing or
-// empty, and that difference is the whole point: a run that linted nothing
-// reports no issues, which is indistinguishable from a clean repository until
-// the scope says zero files.
+// empty, or an entry matched by name turned out not to be a regular file, and
+// that difference is the whole point: a run that linted nothing reports no
+// issues, which is indistinguishable from a clean repository until the scope
+// says zero files.
 //
 // The trees are named by configuration rather than spelled out in this comment,
 // because the last time this comment listed them it went stale the moment
@@ -218,7 +240,7 @@ func (d *Docs) LoadAllowlist(repoRoot string) (Allowlist, error) {
 func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, LintScope, error) {
 	var issues []Issue
 
-	docs, err := d.lintedMarkdownFiles(repoRoot)
+	docs, skipped, err := d.lintedMarkdownFiles(repoRoot)
 	if err != nil {
 		return nil, LintScope{}, err
 	}
@@ -230,10 +252,13 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 		issues = append(issues, d.LintMarkdown(s, rel, string(content), allow)...)
 	}
 
-	goFiles, goDirs, err := d.lintedGoFiles(repoRoot)
+	goFiles, goDirs, goSkipped, err := d.lintedGoFiles(repoRoot)
 	if err != nil {
 		return nil, LintScope{}, err
 	}
+	skipped = append(skipped, goSkipped...)
+	sort.Strings(skipped)
+	skipped = slices.Compact(skipped)
 	for _, rel := range goFiles {
 		src, readErr := os.ReadFile(filepath.Join(repoRoot, rel))
 		if readErr != nil {
@@ -257,10 +282,11 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 	})
 
 	scope := LintScope{
-		MarkdownFiles: docs,
-		GoDirs:        goDirs,
-		GoFiles:       goFiles,
-		Allowlist:     allow,
+		MarkdownFiles:    docs,
+		GoDirs:           goDirs,
+		GoFiles:          goFiles,
+		SkippedIrregular: skipped,
+		Allowlist:        allow,
 	}
 	return issues, scope, nil
 }
@@ -279,11 +305,20 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 // issues verbatim twice and double-count the coverage sentence. Compacting the
 // sorted list handles a duplicate from any source, rather than special-casing
 // the one overlap that is easy to picture.
-func (d *Docs) lintedMarkdownFiles(repoRoot string) ([]string, error) {
-	files := append([]string(nil), d.cfg.LintedMarkdown...)
+// Only regular files are collected. filepath.WalkDir selects entries by lstat,
+// so a symlink named "notes.md" matches the suffix test above just as a document
+// does -- and the whole-file read this list feeds does not lstat anything, so it
+// follows the link wherever it goes. That is unbounded rather than merely wrong:
+// pointed at a character device the read never stops allocating, and pointed at
+// a FIFO it never returns at all, both reachable from a documentation-only
+// change that needs no special approval to run a gate. A skipped entry is
+// returned rather than dropped, because a silent gap in coverage is the very
+// thing [LintScope] exists to make visible.
+func (d *Docs) lintedMarkdownFiles(repoRoot string) (files, skipped []string, err error) {
+	files = append([]string(nil), d.cfg.LintedMarkdown...)
 
 	walkRoot := d.cfg.DocsWalkRoot
-	err := filepath.WalkDir(filepath.Join(repoRoot, walkRoot), func(path string, entry fs.DirEntry, walkErr error) error {
+	walkErr := filepath.WalkDir(filepath.Join(repoRoot, walkRoot), func(path string, entry fs.DirEntry, walkErr error) error {
 		switch {
 		case walkErr != nil:
 			return walkErr
@@ -294,15 +329,19 @@ func (d *Docs) lintedMarkdownFiles(repoRoot string) ([]string, error) {
 		if relErr != nil {
 			return relErr
 		}
+		if !entry.Type().IsRegular() {
+			skipped = append(skipped, filepath.ToSlash(rel))
+			return nil
+		}
 		files = append(files, filepath.ToSlash(rel))
 		return nil
 	})
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("walking %s: %w", walkRoot, err)
+	if walkErr != nil && !errors.Is(walkErr, fs.ErrNotExist) {
+		return nil, nil, fmt.Errorf("walking %s: %w", walkRoot, walkErr)
 	}
 
 	sort.Strings(files)
-	return slices.Compact(files), nil
+	return slices.Compact(files), skipped, nil
 }
 
 // lintedGoFiles lists the Go files whose comments to check, sorted and
@@ -317,11 +356,27 @@ func (d *Docs) lintedMarkdownFiles(repoRoot string) ([]string, error) {
 // this walk never opened. A configured directory that is not there is therefore
 // left out, while one that is there but holds no Go files stays in, contributing
 // zero files -- the first is absent coverage, the second is coverage that found
-// nothing, and only the second is a fact about the repository.
-func (d *Docs) lintedGoFiles(repoRoot string) (files, dirs []string, err error) {
+// nothing, and only the second is a fact about the repository. They are sorted
+// and compacted for the same reason the files are: nothing rejects a repeated
+// entry in the configuration, and a directory named twice was still walked once.
+//
+// The existence gate is os.Lstat, not os.Stat, because os.Stat follows a
+// symlink: a symlinked root passed the gate and was reported as covered, while
+// WalkDir lstatted it, found a non-directory and walked nothing -- a scope
+// claiming a directory over zero files, which is exactly the false assurance
+// this pair of return values exists to prevent. A symlinked root is therefore
+// treated as absent, and named in skipped so that the absence is louder than a
+// directory that was simply never created. The walk itself collects only regular
+// files, for the reason given on lintedMarkdownFiles.
+func (d *Docs) lintedGoFiles(repoRoot string) (files, dirs, skipped []string, err error) {
 	for _, dir := range d.cfg.LintedGoDirs {
 		root := filepath.Join(repoRoot, dir)
-		if _, statErr := os.Stat(root); errors.Is(statErr, fs.ErrNotExist) {
+		info, statErr := os.Lstat(root)
+		switch {
+		case errors.Is(statErr, fs.ErrNotExist):
+			continue
+		case statErr == nil && !info.IsDir():
+			skipped = append(skipped, dir)
 			continue
 		}
 		dirs = append(dirs, dir)
@@ -336,13 +391,18 @@ func (d *Docs) lintedGoFiles(repoRoot string) (files, dirs []string, err error) 
 			if relErr != nil {
 				return relErr
 			}
+			if !entry.Type().IsRegular() {
+				skipped = append(skipped, filepath.ToSlash(rel))
+				return nil
+			}
 			files = append(files, filepath.ToSlash(rel))
 			return nil
 		})
 		if walkErr != nil {
-			return nil, nil, fmt.Errorf("walking %s: %w", dir, walkErr)
+			return nil, nil, nil, fmt.Errorf("walking %s: %w", dir, walkErr)
 		}
 	}
 	sort.Strings(files)
-	return slices.Compact(files), dirs, nil
+	sort.Strings(dirs)
+	return slices.Compact(files), slices.Compact(dirs), skipped, nil
 }

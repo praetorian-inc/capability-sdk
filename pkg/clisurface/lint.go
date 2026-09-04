@@ -613,7 +613,7 @@ func (d *Docs) lintGoComments(s Surface, file string, src []byte, allow Allowlis
 
 // LintScope records what a lint run actually reached: the markdown documents it
 // read, the directories it walked for Go files, the Go files it found under
-// them, and the allowlist that was in force.
+// them, the entries it declined to read, and the allowlist that was in force.
 //
 // It exists so [LintReport] can state its own coverage. A scope that matched
 // nothing is the failure mode this type is for: a walk root that is missing, or
@@ -627,6 +627,15 @@ type LintScope struct {
 	GoDirs []string
 	// GoFiles are the repo-relative Go files found under GoDirs and linted.
 	GoFiles []string
+	// SkippedIrregular are the repo-relative entries a walk matched by name but
+	// declined to read because they are not regular files -- a symlink, a
+	// device, a FIFO, a socket -- along with any configured Go directory that
+	// exists but is not a directory. Reading such an entry whole is either
+	// unbounded or never-returning, and following one leaves the repository
+	// altogether, so the walks select on the entry's type rather than on its
+	// name. They are listed rather than dropped for the reason the rest of this
+	// type exists: an unexplained gap in coverage reads as a clean repository.
+	SkippedIrregular []string
 	// Allowlist is the allowlist the run suppressed tokens with.
 	Allowlist Allowlist
 }
@@ -649,6 +658,10 @@ func LintReport(issues []Issue, scope LintScope) string {
 		len(scope.MarkdownFiles), scopeNames(scope.MarkdownFiles),
 		len(scope.GoFiles), len(scope.GoDirs), scopeNames(scope.GoDirs),
 		len(scope.Allowlist.Entries()))
+	if len(scope.SkippedIrregular) > 0 {
+		fmt.Fprintf(&b, "Skipped %d entr(y/ies) that are not regular files [%s]; nothing outside a regular file is read.\n",
+			len(scope.SkippedIrregular), scopeNames(scope.SkippedIrregular))
+	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
