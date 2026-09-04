@@ -839,3 +839,115 @@ func TestFindRepoRootRequiresARegularGoMod(t *testing.T) {
 		assert.Equal(t, root, found, "the search walks past the decoy to the real module root")
 	})
 }
+
+// TestCheckArtifactsRefusesToFollowASymlinkedREADME pins the read half of the
+// rule Write already enforces on the write half. Trust attaches to the Config
+// value, not to what that value resolves to: a documentation-only change can
+// replace the repository's own README with a symlink, and the splice read in
+// artifacts followed it -- reading a file outside the tree and rendering it
+// into the artifact the gate then compares.
+//
+// A copy of the real README stands in for the victim, so the splice succeeds
+// and the pinned behaviour is the refusal rather than an incidental marker
+// error. A regular file outside the repository stands in for the unbounded
+// device for the reason given on TestLintRepoSkipsANonRegularMarkdownEntry.
+func TestCheckArtifactsRefusesToFollowASymlinkedREADME(t *testing.T) {
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	readmePath := filepath.Join(root, d.Config().READMEPath)
+	original, err := os.ReadFile(readmePath)
+	require.NoError(t, err)
+	victim := filepath.Join(t.TempDir(), "victim.md")
+	require.NoError(t, os.WriteFile(victim, original, 0o600))
+	require.NoError(t, os.Remove(readmePath))
+	require.NoError(t, os.Symlink(victim, readmePath))
+
+	stale, checkErr := d.CheckArtifacts(root, Walk(newTestTree()))
+
+	require.Error(t, checkErr)
+	assert.Nil(t, stale, "a refusal is not a drift report")
+	assert.Contains(t, checkErr.Error(), d.Config().READMEPath, "the message names the input at fault")
+	assert.Contains(t, checkErr.Error(), "not a regular file")
+
+	content, readErr := os.ReadFile(victim)
+	require.NoError(t, readErr)
+	assert.Equal(t, string(original), string(content), "the file the symlink pointed at is untouched")
+}
+
+// TestCheckArtifactsRefusesToFollowASymlinkedArtifact is the drift-check half.
+// The comparison read is a whole-file read of a configured path and followed a
+// symlink exactly as the splice read did.
+//
+// The refusal is an error rather than a Staleness because Staleness.String ends
+// every line with "Regenerate it with '<command>'", and Write refuses this same
+// file: a Staleness here would advise a repair that cannot run, which is the
+// drift no correct regeneration can clear that the Write guard exists to
+// prevent, reached by a politer route. The operator's repair is to remove the
+// non-regular file, and only an error can say so.
+func TestCheckArtifactsRefusesToFollowASymlinkedArtifact(t *testing.T) {
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	victim := filepath.Join(t.TempDir(), "victim.md")
+	require.NoError(t, os.WriteFile(victim, []byte("private\n"), 0o600))
+	require.NoError(t, os.Symlink(victim, filepath.Join(root, d.Config().MarkdownPath)))
+
+	stale, err := d.CheckArtifacts(root, Walk(newTestTree()))
+
+	require.Error(t, err)
+	assert.Nil(t, stale, "a refusal is not a drift report")
+	assert.Contains(t, err.Error(), d.Config().MarkdownPath, "the message names the artifact at fault")
+	assert.Contains(t, err.Error(), "not a regular file")
+
+	content, readErr := os.ReadFile(victim)
+	require.NoError(t, readErr)
+	assert.Equal(t, "private\n", string(content), "the file the symlink pointed at is untouched")
+}
+
+// TestLoadAllowlistRefusesANonRegularFile pins the allowlist read. A missing
+// allowlist is deliberately an empty allowlist rather than an error, and that
+// is exactly why a non-regular one may not be folded into the same branch: the
+// file is present, and reporting it as absent silences nothing while turning
+// every deliberately documented token into a lint issue -- a red gate whose
+// stated cause is a token that was allowlisted all along. It is one required
+// input, not a collection, so the failure is an error.
+func TestLoadAllowlistRefusesANonRegularFile(t *testing.T) {
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	victim := filepath.Join(t.TempDir(), "victim.txt")
+	require.NoError(t, os.WriteFile(victim, []byte("--removed-flag # kept for the changelog\n"), 0o600))
+	require.NoError(t, os.Symlink(victim, filepath.Join(root, d.Config().AllowlistPath)))
+
+	allow, err := d.LoadAllowlist(root)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), d.Config().AllowlistPath, "the message names the input at fault")
+	assert.Contains(t, err.Error(), "not a regular file")
+	assert.False(t, allow.Allows("--removed-flag"), "nothing outside the repository was read")
+}
+
+// TestLintRepoSkipsANonRegularConfiguredMarkdownEntry is the seeded half of the
+// rule TestLintRepoSkipsANonRegularMarkdownEntry pins for the walk.
+// lintedMarkdownFiles seeded its result from Config.LintedMarkdown without
+// inspecting the entries, so a configured document that had become a symlink
+// reached the whole-file read that the walk-discovered entries beside it are
+// protected from -- the same read, the same hazard, selected by a different
+// route.
+//
+// Skipping and reporting rather than erroring is what makes this consistent
+// with the walk: a configured document is one of a collection, and
+// LintScope.SkippedIrregular already exists to keep the resulting gap in
+// coverage visible.
+func TestLintRepoSkipsANonRegularConfiguredMarkdownEntry(t *testing.T) {
+	d := newTestDocs(t, withContributing)
+	root := newFakeRepo(t, d)
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	require.NoError(t, os.WriteFile(outside, []byte("```bash\ntool scan --removed-flag\n```\n"), 0o644))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "CONTRIBUTING.md")))
+
+	issues, scope, err := d.LintRepo(root, Walk(newTestTree()), emptyAllowlist(t))
+	require.NoError(t, err)
+
+	assert.NotContains(t, scope.MarkdownFiles, "CONTRIBUTING.md", "a symlink is not a regular file, so it is not read")
+	assert.Empty(t, issues, "nothing outside the repository was read")
+	assert.Contains(t, scope.SkippedIrregular, "CONTRIBUTING.md", "the skip is reported, never silent")
+}

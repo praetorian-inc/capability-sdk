@@ -66,7 +66,21 @@ func (d *Docs) artifacts(repoRoot string, s Surface) ([]artifact, error) {
 		return nil, err
 	}
 
+	// The README is read whole and spliced, so it is guarded on the way in for
+	// the reason [Docs.Write] guards it on the way out. Trust attaches to the
+	// configured value, not to what that value resolves to: a documentation-only
+	// change can leave READMEPath a symlink, and reading through one renders a
+	// file from outside the repository into the artifacts -- the same escape
+	// Write refuses, in the opposite direction.
+	//
+	// It is an error rather than a skip because this is a single required input
+	// and there is no artifact without it. Every caller gets the refusal, so
+	// [Docs.CheckArtifacts] and Write agree about the same file instead of one
+	// reporting drift the other refuses to clear.
 	readmePath := filepath.Join(repoRoot, d.cfg.READMEPath)
+	if isIrregular(readmePath) {
+		return nil, fmt.Errorf("refusing to read %s: it exists and is not a regular file", d.cfg.READMEPath)
+	}
 	readme, err := os.ReadFile(readmePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", d.cfg.READMEPath, err)
@@ -94,8 +108,8 @@ func (d *Docs) artifacts(repoRoot string, s Surface) ([]artifact, error) {
 // path, but a shape cannot express where a path resolves to: with the
 // repository's own docs/CLI.md replaced by a symlink, an ordinary regeneration
 // would overwrite whatever it pointed at -- outside the repository, at the
-// target's own mode, leaving nothing behind to notice. os.Lstat is the portable
-// way to see that; syscall.O_NOFOLLOW is not available on Windows.
+// target's own mode, leaving nothing behind to notice. See isIrregular for why
+// the test is os.Lstat.
 //
 // The refusal is a returned error and never a skip. A skipped artifact would
 // leave [Docs.CheckArtifacts] reporting drift that no correct regeneration
@@ -110,7 +124,7 @@ func (d *Docs) Write(repoRoot string, s Surface) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("creating directory for %s: %w", artifacts[i].Path, err)
 		}
-		if info, lstatErr := os.Lstat(path); lstatErr == nil && !info.Mode().IsRegular() {
+		if isIrregular(path) {
 			return fmt.Errorf("refusing to write %s: it already exists and is not a regular file", artifacts[i].Path)
 		}
 		if err := os.WriteFile(path, artifacts[i].Content, 0o644); err != nil {
@@ -159,6 +173,16 @@ func (s Staleness) String() string {
 // disk while the renderers emit LF -- comparing raw bytes would report every
 // generated file as stale on Windows, which is exactly the unexplained friction
 // that gets a gate disabled.
+//
+// An artifact that exists as something other than a regular file is refused
+// with an error rather than reported as staleness -- the one problem this
+// method reports without calling it drift. Drift is by definition what
+// [Docs.Write] clears, and Write refuses this same file; since every
+// [Staleness] renders as "Regenerate it with ...", reporting one here would
+// advise a repair that cannot run, which is the unrecoverable red gate the
+// Write guard exists to prevent, reached by a politer route. The repair is to
+// remove the non-regular file, and only an error can say so. A merely missing
+// artifact stays staleness, because regenerating really does clear that one.
 func (d *Docs) CheckArtifacts(repoRoot string, s Surface) ([]Staleness, error) {
 	artifacts, err := d.artifacts(repoRoot, s)
 	if err != nil {
@@ -168,6 +192,9 @@ func (d *Docs) CheckArtifacts(repoRoot string, s Surface) ([]Staleness, error) {
 	var stale []Staleness
 	for i := range artifacts {
 		path := filepath.Join(repoRoot, artifacts[i].Path)
+		if isIrregular(path) {
+			return nil, fmt.Errorf("refusing to read %s: it exists and is not a regular file", artifacts[i].Path)
+		}
 		onDisk, readErr := os.ReadFile(path)
 		if readErr != nil {
 			stale = append(stale, d.stampStaleness(Staleness{
@@ -210,8 +237,21 @@ func firstDifference(committed, generated []byte) string {
 
 // LoadAllowlist reads the deliberate-mention allowlist from the path [Config]
 // names. A missing file is an empty allowlist, not an error.
+//
+// A file that is present but not a regular one is an error, and deliberately
+// not folded into the missing-file branch above it. It is one required input
+// rather than one of a collection, so there is no coverage list to record the
+// gap in, and absent and present-but-unreadable do not mean the same thing:
+// silently treating this one as absent suppresses nothing while turning every
+// deliberately documented token into a lint issue -- a red gate whose stated
+// cause is a token that was allowlisted all along, with nothing anywhere in the
+// output naming the allowlist that was never read. Erring names the real fault.
 func (d *Docs) LoadAllowlist(repoRoot string) (Allowlist, error) {
-	content, err := os.ReadFile(filepath.Join(repoRoot, d.cfg.AllowlistPath))
+	allowlistPath := filepath.Join(repoRoot, d.cfg.AllowlistPath)
+	if isIrregular(allowlistPath) {
+		return Allowlist{}, fmt.Errorf("refusing to read %s: it exists and is not a regular file", d.cfg.AllowlistPath)
+	}
+	content, err := os.ReadFile(allowlistPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return d.ParseAllowlist("")
@@ -227,12 +267,12 @@ func (d *Docs) LoadAllowlist(repoRoot string) (Allowlist, error) {
 // the Go comments under the trees it names. Issues come back sorted by file and
 // line.
 //
-// The returned [LintScope] is what the walk actually reached, not what was
+// The returned [LintScope] is what the run actually reached, not what was
 // configured. The two differ whenever a configured directory is missing or
-// empty, or an entry matched by name turned out not to be a regular file, and
-// that difference is the whole point: a run that linted nothing reports no
-// issues, which is indistinguishable from a clean repository until the scope
-// says zero files.
+// empty, or an entry turned out not to be a regular file -- one a walk matched
+// by name and one [Config] named outright alike -- and that difference is the
+// whole point: a run that linted nothing reports no issues, which is
+// indistinguishable from a clean repository until the scope says zero files.
 //
 // The trees are named by configuration rather than spelled out in this comment,
 // because the last time this comment listed them it went stale the moment
@@ -306,7 +346,7 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 // sorted list handles a duplicate from any source, rather than special-casing
 // the one overlap that is easy to picture.
 // Only regular files are collected. filepath.WalkDir selects entries by lstat,
-// so a symlink named "notes.md" matches the suffix test above just as a document
+// so a symlink named "notes.md" matches the suffix test below just as a document
 // does -- and the whole-file read this list feeds does not lstat anything, so it
 // follows the link wherever it goes. That is unbounded rather than merely wrong:
 // pointed at a character device the read never stops allocating, and pointed at
@@ -314,8 +354,25 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 // change that needs no special approval to run a gate. A skipped entry is
 // returned rather than dropped, because a silent gap in coverage is the very
 // thing [LintScope] exists to make visible.
+//
+// The configured seeds are held to the same rule, and for the same reason: they
+// feed the identical read, and a configured document can become a symlink
+// exactly as a discovered one can. Trust attaches to the [Config] value, never
+// to what that value resolves to. They are skipped and reported rather than
+// erring because a configured document is one of a collection, which is what
+// separates them from the single required inputs [Docs.LoadAllowlist] and
+// [Docs.artifacts] read -- and because skipping is already what the walk beside
+// them does with the same defect. A seed that does not exist at all is left in
+// place so the read still fails loudly: nothing was named that could not be
+// found, which is a mistake in the configuration rather than a gap in coverage.
 func (d *Docs) lintedMarkdownFiles(repoRoot string) (files, skipped []string, err error) {
-	files = append([]string(nil), d.cfg.LintedMarkdown...)
+	for _, rel := range d.cfg.LintedMarkdown {
+		if isIrregular(filepath.Join(repoRoot, rel)) {
+			skipped = append(skipped, filepath.ToSlash(rel))
+			continue
+		}
+		files = append(files, rel)
+	}
 
 	walkRoot := d.cfg.DocsWalkRoot
 	walkErr := filepath.WalkDir(filepath.Join(repoRoot, walkRoot), func(path string, entry fs.DirEntry, walkErr error) error {
@@ -405,4 +462,32 @@ func (d *Docs) lintedGoFiles(repoRoot string) (files, dirs, skipped []string, er
 	sort.Strings(files)
 	sort.Strings(dirs)
 	return slices.Compact(files), slices.Compact(dirs), skipped, nil
+}
+
+// isIrregular reports whether path exists as something other than a regular
+// file. It is the one gate every read and write in this package goes through,
+// so that a configured path and a discovered one are held to the same rule: a
+// [Config] value is authored by someone the package trusts, but what that value
+// resolves to on disk is not authored by anyone, and following a symlink on a
+// read is the same escape as following one on a write.
+//
+// The test is os.Lstat rather than os.Stat because os.Stat follows a symlink
+// and so reports on the target: the very thing being screened out would be
+// reported as the regular file it points at. Doing it at open time with
+// syscall.O_NOFOLLOW would close the window between the check and the read,
+// but that flag does not exist on Windows and this package generates
+// documentation on every platform its consumer builds on. The residual race is
+// accepted: the threat is a committed symlink that a reviewer waved through,
+// not a process racing the gate.
+//
+// A path that does not exist is not irregular. Every caller distinguishes the
+// two, and reporting a missing file through this predicate would collapse
+// "nothing is there" into "something wrong is there" -- for [Docs.Write] the
+// ordinary first generation, and for [Docs.CheckArtifacts] the drift that
+// regenerating exists to clear. An os.Lstat that fails for any other reason
+// also reads as not-irregular, which hands the real error to the read or write
+// that follows, where it is reported with the operation that wanted it.
+func isIrregular(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && !info.Mode().IsRegular()
 }

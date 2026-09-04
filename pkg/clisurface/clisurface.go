@@ -91,12 +91,22 @@
 // the shape of a string, while the filesystem decides where that string leads.
 // A symlink anywhere along an entirely valid path puts the write or the read
 // outside the repository, and no amount of checking the string can see that.
-// Write refuses a target that already exists as something other than a regular
-// file, and the lint walks read regular files only, precisely because those two
-// operations are where the consequence lands -- but they are narrow guards on
-// two operations, not containment. This is a code generator invoked by the
-// repository it generates into: whoever supplies the Config already controls
-// the source tree.
+// So every file this package opens is screened first, and a path that exists as
+// something other than a regular file is never opened: Write refuses such a
+// target, and every read -- the README it splices, the artifacts it compares,
+// the allowlist, and each document and Go file it lints -- declines it. The
+// screen applies to a path named in a Config exactly as it does to one a walk
+// discovered, because trust attaches to the configured value and not to what
+// that value resolves to on disk. Two failure modes follow from what the input
+// is rather than from where it came: a single required input is refused with an
+// error, while one document out of a linted collection is skipped and named in
+// [LintScope].SkippedIrregular, so the gap in coverage is reported rather than
+// silent.
+//
+// That is still a guard on the endpoints, not containment -- a symlinked parent
+// directory relocates a write that every one of these checks passes. This is a
+// code generator invoked by the repository it generates into: whoever supplies
+// the Config already controls the source tree.
 //
 // The command tree is trusted on the same terms. Walk recurses over it with no
 // visited set, so a tree containing a cycle -- a is a child of b and b a child

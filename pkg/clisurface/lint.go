@@ -627,14 +627,19 @@ type LintScope struct {
 	GoDirs []string
 	// GoFiles are the repo-relative Go files found under GoDirs and linted.
 	GoFiles []string
-	// SkippedIrregular are the repo-relative entries a walk matched by name but
-	// declined to read because they are not regular files -- a symlink, a
-	// device, a FIFO, a socket -- along with any configured Go directory that
-	// exists but is not a directory. Reading such an entry whole is either
-	// unbounded or never-returning, and following one leaves the repository
-	// altogether, so the walks select on the entry's type rather than on its
-	// name. They are listed rather than dropped for the reason the rest of this
-	// type exists: an unexplained gap in coverage reads as a clean repository.
+	// SkippedIrregular are the repo-relative entries the run declined to read
+	// because they are not regular files -- a symlink, a device, a FIFO, a
+	// socket -- along with any configured Go directory that exists but is not a
+	// directory. Reading such an entry whole is either unbounded or
+	// never-returning, and following one leaves the repository altogether, so
+	// what is read is selected by the entry's type rather than by its name.
+	//
+	// An entry lands here whether a walk matched it by name or
+	// [Config.LintedMarkdown] named it outright: the two feed the same read and
+	// carry the same hazard, and a configured path is trusted as a value, not as
+	// whatever it resolves to on disk. They are listed rather than dropped for
+	// the reason the rest of this type exists: an unexplained gap in coverage
+	// reads as a clean repository.
 	SkippedIrregular []string
 	// Allowlist is the allowlist the run suppressed tokens with.
 	Allowlist Allowlist
