@@ -128,33 +128,40 @@ func New(cfg Config) (*Docs, error) {
 		return nil, err
 	}
 
-	return &Docs{cfg: resolved.cleanScalarPaths()}, nil
+	return &Docs{cfg: resolved.cleanPaths()}, nil
 }
 
-// cleanScalarPaths returns cfg with every scalar path field cleaned, the slice
-// fields having been cleaned by withDefaults already.
+// cleanPaths returns cfg with every path field cleaned, scalar and slice alike.
 //
-// It runs after validate, not before, and both halves of that matter. Cleaning
-// first would collapse a ".." element -- "docs/../../etc" becomes "../etc",
-// "docs/../etc" becomes "etc" -- so a path validate exists to reject would
-// either change meaning or pass, and error messages would quote a spelling the
-// caller never wrote. Running after means cleaning can only drop a "./", a
-// doubled slash or a trailing one: it cannot introduce a "..", an absolute path,
-// a backslash or an empty string, so nothing validate ruled out can arrive
-// through it.
+// It runs after validate, not before, and both halves of that matter for every
+// field it touches. Cleaning first would collapse a ".." element --
+// "docs/../../etc" becomes "../etc", "docs/../etc" becomes "etc", "cmd/.."
+// becomes "." -- so a path validate exists to reject would either change
+// meaning or pass, and error messages would quote a spelling the caller never
+// wrote. Running after means cleaning can only drop a "./", a doubled slash or
+// a trailing one: it cannot introduce a "..", an absolute path, a backslash or
+// an empty string, so nothing validate ruled out can arrive through it.
+//
+// The slice fields are held to that order for the same reason as the scalar
+// ones, and the widening a cleaned-first entry bought was worse: "cmd/.." named
+// the whole repository rather than cmd, and "cmd/../internal" retargeted the Go
+// comment walk to a directory the caller never wrote.
 //
 // Without this the paths a Docs holds are compared against paths that came from
 // a filesystem walk, which are cleaned. Issue.whollyGenerated is the case that
 // bit: with MarkdownPath left as "./docs/CLI.md" it never equalled the
 // "docs/CLI.md" the walk produced, so a lint hit inside the generated reference
 // was reported as prose to hand-edit or allowlist -- exactly what the message it
-// should have printed tells the reader not to do.
-func (cfg Config) cleanScalarPaths() Config {
+// should have printed tells the reader not to do. The slice half of the same
+// comparison is a deduplication: see cleanPathEntries.
+func (cfg Config) cleanPaths() Config {
 	cfg.DocsWalkRoot = cleanScalarPath(cfg.DocsWalkRoot)
 	cfg.JSONPath = cleanScalarPath(cfg.JSONPath)
 	cfg.MarkdownPath = cleanScalarPath(cfg.MarkdownPath)
 	cfg.READMEPath = cleanScalarPath(cfg.READMEPath)
 	cfg.AllowlistPath = cleanScalarPath(cfg.AllowlistPath)
+	cfg.LintedMarkdown = cleanPathEntries(cfg.LintedMarkdown)
+	cfg.LintedGoDirs = cleanPathEntries(cfg.LintedGoDirs)
 
 	return cfg
 }
@@ -193,6 +200,11 @@ func (d *Docs) GeneratedPaths() []string {
 // through path.Join, never the filepath package's join, because the result is
 // artifact content as well as a path: a platform-aware join would emit
 // backslashes on Windows and break byte parity with the committed artifacts.
+//
+// It resolves and clones, and deliberately cleans nothing: cleaning is
+// cleanPaths' job and runs after validate, so validate sees every path field --
+// the entries of the two slice-valued ones included -- in the spelling the
+// caller wrote.
 func (cfg Config) withDefaults() Config {
 	cfg.DocsWalkRoot = cmp.Or(cfg.DocsWalkRoot, defaultDocsWalkRoot)
 	cfg.JSONPath = cmp.Or(cfg.JSONPath, path.Join(cfg.DocsWalkRoot, defaultJSONName))
@@ -210,8 +222,6 @@ func (cfg Config) withDefaults() Config {
 	if cfg.LintedGoDirs == nil {
 		cfg.LintedGoDirs = []string{"cmd", "internal", "pkg"}
 	}
-	cfg.LintedMarkdown = cleanPathEntries(cfg.LintedMarkdown)
-	cfg.LintedGoDirs = cleanPathEntries(cfg.LintedGoDirs)
 
 	return cfg.clone()
 }
@@ -223,10 +233,16 @@ func (cfg Config) withDefaults() Config {
 // same file is linted twice: every issue in it is reported twice and the
 // coverage sentence counts it twice.
 //
+// It runs after validate, never before, for the reason cleanPaths gives: an
+// entry cleaned first has had its ".." elements resolved away, so the check
+// that rejects them sees a different -- and wider -- path than the caller wrote.
+//
 // An empty entry is deliberately left as it is rather than cleaned, because
 // path.Clean("") is ".", which would turn an obvious mistake into a silent walk
-// of the entire repository. validate rejects it a moment later and names the
-// index at fault.
+// of the entire repository. Nothing reaches it empty today, since validate has
+// already rejected such an entry and named the index at fault, but the guard is
+// a single comparison and the failure it forecloses is silent -- the same trade
+// cleanScalarPath makes.
 func cleanPathEntries(values []string) []string {
 	cleaned := make([]string, len(values))
 	for i, value := range values {

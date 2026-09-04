@@ -381,6 +381,44 @@ func TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway(t *testing.T) 
 	assert.Contains(t, msg, "docs/../outside.json", "and the message quotes the spelling the caller wrote")
 }
 
+// TestNew_StillRejectsAParentTraversalLintScopeEntryRatherThanCleaningItAway is
+// the slice half of TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway,
+// and the reason cleaning has to run after validation for every path field
+// rather than for the scalar ones alone. path.Clean resolves ".." against the
+// element in front of it, so a lint-scope entry cleaned before validate saw it
+// arrived as a perfectly valid path naming a different tree: "cmd/.." widens the
+// Go comment walk from cmd to the whole repository, and "cmd/../internal"
+// silently retargets it to a directory the caller never named. "pkg/../.." keeps
+// its leading traversal and was rejected either way, but only on the cleaned
+// spelling -- so the message quoted a path the caller never wrote.
+func TestNew_StillRejectsAParentTraversalLintScopeEntryRatherThanCleaningItAway(t *testing.T) {
+	spellings := map[string]string{
+		"widens the walk to the whole repository":  "cmd/..",
+		"retargets the walk to a sibling tree":     "cmd/../internal",
+		"retargets it outside the tree named":      "docs/../outside",
+		"keeps a leading traversal after cleaning": "pkg/../..",
+	}
+	fields := map[string]func(*Config, string){
+		"LintedGoDirs":   func(cfg *Config, value string) { cfg.LintedGoDirs = []string{value} },
+		"LintedMarkdown": func(cfg *Config, value string) { cfg.LintedMarkdown = []string{value} },
+	}
+
+	for field, set := range fields {
+		for name, spelling := range spellings {
+			t.Run(field+"/"+name, func(t *testing.T) {
+				cfg := Config{RegenerateCommand: testRegenerateCommand}
+				set(&cfg, spelling)
+
+				msg := newTestDocsError(t, cfg)
+
+				assert.Contains(t, msg, "Config."+field+"[0]")
+				assert.Contains(t, msg, `must not contain a ".." element`)
+				assert.Contains(t, msg, spelling, "and the message quotes the spelling the caller wrote")
+			})
+		}
+	}
+}
+
 // TestCleanScalarPathLeavesAnEmptyPathEmpty guards the trap cleanPathEntries
 // already documents: path.Clean("") is ".", so cleaning an empty path field
 // would replace a missing path with one naming the walk's own root. No
@@ -391,6 +429,20 @@ func TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway(t *testing.T) 
 func TestCleanScalarPathLeavesAnEmptyPathEmpty(t *testing.T) {
 	assert.Equal(t, "", cleanScalarPath(""), "path.Clean would answer \".\"")
 	assert.Equal(t, "docs", cleanScalarPath("./docs/"))
+}
+
+// TestCleanPathEntriesLeavesAnEmptyEntryEmpty is the slice twin of the guard
+// above, and it is exercised directly for the same reason: cleaning runs after
+// validate, which has already rejected an empty entry by name, so no
+// configuration reaches the carve-out through New. Left untested it reads as
+// dead code to whoever touches cleanPathEntries next -- and dropping it would
+// turn the empty entry validate names into a silent walk of the entire
+// repository the moment the two ever ran in the other order again.
+func TestCleanPathEntriesLeavesAnEmptyEntryEmpty(t *testing.T) {
+	assert.Equal(t,
+		[]string{"", "docs/guide.md", "pkg"},
+		cleanPathEntries([]string{"", "./docs/guide.md", "pkg/"}),
+		"path.Clean would answer \".\" for the empty entry")
 }
 
 // TestNew_RejectsABackslashPathField closes a gap that only shows on POSIX:
@@ -435,12 +487,12 @@ func TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
 	assert.Equal(t, first, second, "a resolved Config must be a fixed point of New")
 }
 
-// TestNew_CleansSlicePathEntries is the C4 half of the cleaning rule. The
-// scalar path fields are stored verbatim because they are artifact content, but
-// a lint-scope entry is only ever a lookup key -- and left uncleaned,
-// "./docs/guide.md" and the "docs/guide.md" the documentation walk produces are
-// two distinct strings that slices.Compact cannot merge, so the file is linted
-// twice.
+// TestNew_CleansSlicePathEntries is the C4 half of the cleaning rule, and the
+// reason cleanPaths must still clean the slice fields once validate has passed:
+// left uncleaned, "./docs/guide.md" and the "docs/guide.md" the documentation
+// walk produces are two distinct strings that slices.Compact cannot merge, so
+// the file is linted twice -- every issue in it reported twice and the coverage
+// sentence counting it twice.
 func TestNew_CleansSlicePathEntries(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) {
 		cfg.LintedMarkdown = []string{"./docs/guide.md", "docs/"}
@@ -450,16 +502,6 @@ func TestNew_CleansSlicePathEntries(t *testing.T) {
 
 	assert.Equal(t, []string{"docs/guide.md", "docs"}, cfg.LintedMarkdown)
 	assert.Equal(t, []string{"pkg", "internal"}, cfg.LintedGoDirs)
-}
-
-// TestNew_StillRejectsAnEmptySliceEntryAfterCleaning guards the interaction
-// between cleaning and validation: path.Clean("") is ".", which would turn the
-// empty entry validation rejects into a silent "walk the whole repository".
-// Cleaning therefore leaves an empty entry alone for validate to catch.
-func TestNew_StillRejectsAnEmptySliceEntryAfterCleaning(t *testing.T) {
-	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{""}})
-
-	assert.Contains(t, msg, "Config.LintedGoDirs[0] must not be empty")
 }
 
 // TestNew_RejectsAPathContainingAngleBrackets is the S3 check. MarkdownPath is
