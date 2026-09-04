@@ -405,3 +405,202 @@ func TestRenderRegionsLinksToTheConfiguredMarkdownPath(t *testing.T) {
 	assert.NotContains(t, body, "docs/CLI.md",
 		"the default path must not survive anywhere in the region once MarkdownPath moves")
 }
+
+// --- angle-bracket escaping -------------------------------------------------
+
+// newAngleSurface is the shape the escaping fix was measured on: a cobra help
+// string carrying an argument placeholder spelled with angle brackets, in every
+// slot the markdown renderer can put one. Markdown passes raw HTML through, so
+// an unescaped "<domain>" is read as an unknown tag and VANISHES -- the
+// generated reference then documents a description other than the one it was
+// handed.
+//
+// The surface is hand-built rather than walked from cobra because a flag Type
+// and a RejectedReason are the two columns a cobra tree cannot be made to fill
+// with angle brackets on demand, and both of them reach the page through cell().
+func newAngleSurface() Surface {
+	return Surface{Commands: []Command{
+		{Path: "tool", Use: "tool", Short: "the tool", Runnable: true},
+		{
+			Path:       "tool scan",
+			Use:        "scan <domain>",
+			Short:      "scan a <domain> for issues",
+			Deprecated: `use "tool probe <domain>" instead`,
+			Runnable:   true,
+			Example:    "  tool scan <domain>",
+			Flags: []Flag{
+				{Name: "target", Type: "<host:port>", Usage: "target as <host>:<port>", Default: "<none>"},
+				{
+					Name: "timeout", Type: "duration", Usage: "per-target timeout",
+					Inherited: true, Rejected: true,
+					RejectedReason: "not usable here; pass <scan-timeout> instead",
+				},
+			},
+		},
+	}}
+}
+
+// tableRow returns the one markdown table row that begins with token, so an
+// assertion about a single column cannot be satisfied by prose elsewhere in the
+// document -- which is exactly how an escaping test passes while the column it
+// names is still raw.
+func tableRow(t *testing.T, md, token string) string {
+	t.Helper()
+
+	var found []string
+	for _, line := range strings.Split(md, "\n") {
+		if strings.HasPrefix(line, "| "+token+" |") {
+			found = append(found, line)
+		}
+	}
+	require.Len(t, found, 1, "exactly one table row must begin with %q", token)
+	return found[0]
+}
+
+// TestRenderMarkdownEscapesAngleBracketsInEveryDescriptionColumn covers the
+// four cells cell() feeds: the command-index Description, the flag-table
+// Description, the flag-table Type, and the rejected-flag Why. Before the fix
+// cell() escaped a newline and a pipe but not an angle bracket, so a placeholder
+// in any of them was swallowed by the renderer.
+func TestRenderMarkdownEscapesAngleBracketsInEveryDescriptionColumn(t *testing.T) {
+	d := newTestDocs(t)
+
+	md := string(d.renderMarkdown(newAngleSurface()))
+
+	index := indexRow(t, md, "tool scan")
+	assert.Contains(t, index, `scan a &lt;domain&gt; for issues (deprecated: use "tool probe &lt;domain&gt;" instead)`,
+		"the command-index Description column is escaped, annotation included")
+	assert.NotContains(t, index, "<domain>", "no raw placeholder survives in the index row")
+
+	target := tableRow(t, md, "`--target`")
+	assert.Contains(t, target, "| &lt;host:port&gt; |", "the Type column is escaped")
+	assert.Contains(t, target, "| target as &lt;host&gt;:&lt;port&gt; |", "the flag Description column is escaped")
+	assert.NotContains(t, target, "<host", "no raw placeholder survives in the flag row's escaped columns")
+
+	rejected := tableRow(t, md, "`--timeout`")
+	assert.Contains(t, rejected, "| not usable here; pass &lt;scan-timeout&gt; instead |",
+		"the rejected-flag Why column is escaped")
+	assert.NotContains(t, rejected, "<scan-timeout>")
+}
+
+// TestRenderMarkdownEscapesTheCommandBodyProse covers the two slots that never
+// went through cell() at all: Short is written as a body paragraph and
+// Deprecated as a body line, so both reached the page raw however well the
+// table cells were escaped.
+func TestRenderMarkdownEscapesTheCommandBodyProse(t *testing.T) {
+	d := newTestDocs(t)
+
+	scan := section(t, string(d.renderMarkdown(newAngleSurface())), "tool scan")
+
+	assert.Contains(t, scan, "\nscan a &lt;domain&gt; for issues\n",
+		"the Short paragraph is escaped, and it is a paragraph rather than a cell")
+	assert.Contains(t, scan, "\n- Deprecated: use \"tool probe &lt;domain&gt;\" instead\n",
+		"the Deprecated line is escaped too")
+	assert.NotContains(t, scan, "scan a <domain> for issues")
+	assert.NotContains(t, scan, "tool probe <domain>")
+}
+
+// TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped is the negative half, and
+// it is the one that matters most: angle brackets are already inert inside a
+// code span or a fence, so escaping them there renders the four literal
+// characters "&lt;" to the reader. Over-escaping is the likelier future
+// regression -- it is what a well-meaning "escape everything" change produces --
+// and nothing else in the suite would catch it.
+func TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped(t *testing.T) {
+	d := newTestDocs(t)
+	s := newAngleSurface()
+
+	md := string(d.renderMarkdown(s))
+	scan := section(t, md, "tool scan")
+
+	assert.Contains(t, scan, "- Usage: `tool scan <domain>`\n",
+		"usage() renders into a code span, where the brackets are already inert")
+	assert.Contains(t, tableRow(t, md, "`--target`"), "| `<none>` |",
+		"the Default column is a code span, so it keeps the value cobra gave it")
+	assert.Contains(t, scan, "```bash\ntool scan <domain>\n```",
+		"the Examples fence is verbatim shell: an escaped bracket there is a wrong command")
+
+	region := d.renderRegions(s)[0].Body
+	assert.Contains(t, region, "tool scan # scan a <domain> for issues",
+		"the subcommand region writes Short inside a bash fence, so it stays raw there")
+	assert.NotContains(t, region, "&lt;", "nothing in the region is escaped")
+}
+
+// TestEscapeAnglesLeavesTheAmpersandAlone pins a deliberate decision, not an
+// oversight. "<" and ">" are the whole escape set: the pair is order-independent
+// (neither "&lt;" nor "&gt;" contains an angle bracket, so neither can feed the
+// other) and self-terminating, while "&" is the one character whose escaping
+// creates the double-escape problem -- it would rewrite a help string that
+// already reads "&lt;" into "&amp;lt;". CommonMark renders a bare "&" literally,
+// so escaping it buys nothing and costs correctness.
+//
+// A later "helpful" ampersand escape must fail here rather than quietly ship.
+func TestEscapeAnglesLeavesTheAmpersandAlone(t *testing.T) {
+	assert.Equal(t, "&lt;domain&gt;", escapeAngles("<domain>"))
+	assert.Equal(t, "", escapeAngles(""))
+	assert.Equal(t, "no markup here", escapeAngles("no markup here"))
+
+	assert.Equal(t, "a & b", escapeAngles("a & b"),
+		"a bare ampersand is rendered literally by CommonMark and is left as written")
+	assert.Equal(t, "&lt;", escapeAngles("&lt;"),
+		"an input that already reads &lt; must not become &amp;lt;")
+	assert.Equal(t, "&amp;", escapeAngles("&amp;"))
+	assert.Equal(t, "&lt;a&gt; &amp; &lt;b&gt;", escapeAngles("<a> &amp; <b>"),
+		"escaping the brackets around an existing entity leaves that entity untouched")
+
+	assert.Equal(t, "&gt;&lt;", escapeAngles("><"),
+		"the two replacements are order-independent: neither output contains an angle bracket")
+}
+
+// TestRenderMarkdownDoesNotDoubleEscape is the end-to-end companion: a help
+// string that already carries an entity comes through the renderer unchanged.
+func TestRenderMarkdownDoesNotDoubleEscape(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{{
+		Path: "tool", Use: "tool", Runnable: true,
+		Short: "already reads &lt;domain&gt;, and a & b is bare",
+		Flags: []Flag{{Name: "mode", Type: "string", Usage: "either &lt;fast&gt; or a & b"}},
+	}}}
+
+	md := string(d.renderMarkdown(s))
+
+	assert.Contains(t, md, "already reads &lt;domain&gt;, and a & b is bare")
+	assert.Contains(t, md, "either &lt;fast&gt; or a & b")
+	assert.NotContains(t, md, "&amp;",
+		"the ampersand is the only character whose escaping double-escapes, so it is not escaped")
+	assert.NotContains(t, md, "&amp;lt;")
+}
+
+// --- backtick-bearing values ------------------------------------------------
+
+// TestCodeWidensItsDelimiterAroundABacktick pins the widening at the helper
+// every code span in the document goes through, not just the Default column it
+// used to live in.
+func TestCodeWidensItsDelimiterAroundABacktick(t *testing.T) {
+	assert.Equal(t, "`plain`", code("plain"))
+	assert.Equal(t, "`` a`b ``", code("a`b"))
+	assert.Equal(t, "``` a``b ```", code("a``b"))
+	assert.Equal(t, "```` a```b ````", code("a```b"))
+}
+
+// TestRenderMarkdownWidensTheUsageSpanAroundABacktickInUse is the case that
+// motivated moving the widening into code(): a cobra Use string may carry a
+// backtick, and a plain single-tick wrap closes the span on it -- putting the
+// rest of the value, angle-bracket placeholders included, back into live
+// markdown. usage() deliberately does not escape, precisely because the span is
+// meant to contain it, so a span that closes early is a correctness bug and not
+// a cosmetic one.
+func TestRenderMarkdownWidensTheUsageSpanAroundABacktickInUse(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{
+		{Path: "tool", Use: "tool", Short: "the tool", Runnable: true},
+		{Path: "tool scan", Use: "scan `--target` <domain>", Short: "scan things", Runnable: true},
+	}}
+
+	scan := section(t, string(d.renderMarkdown(s)), "tool scan")
+
+	assert.Contains(t, scan, "- Usage: `` tool scan `--target` <domain> ``\n",
+		"the delimiter widens and the padding keeps the value's own backticks inside the span")
+	assert.NotContains(t, scan, "- Usage: `tool scan `",
+		"a single-tick wrap would close at the value's backtick and push <domain> into live markdown")
+}

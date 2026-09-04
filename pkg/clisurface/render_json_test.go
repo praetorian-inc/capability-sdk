@@ -133,3 +133,35 @@ func TestParseJSONWrapsTheDecoderError(t *testing.T) {
 	require.ErrorAs(t, err, &syntaxErr, "the decoder's *json.SyntaxError stays reachable through %w")
 	assert.Contains(t, err.Error(), "parsing cli surface json", "and the wrapper still says what failed")
 }
+
+// TestJSONAndMarkdownDisagreeAboutHTMLEscapingOnPurpose renders one surface
+// through both writers and asserts each side of a deliberate asymmetry, so that
+// "the two renderers disagree" cannot be mistaken for a bug and unified.
+//
+// They disagree because their consumers do. JSON is a machine artifact whose
+// consumers -- committed goldens, diff tooling, anything that reads a help
+// string back out -- need the bytes cobra produced, which is why renderJSON
+// turns Go's HTML escaping off. Markdown is rendered as HTML, so the same bytes
+// placed in prose or a table cell are read as markup and silently dropped;
+// there, escaping is what preserves the help string. Unifying either direction
+// corrupts one of the two artifacts.
+func TestJSONAndMarkdownDisagreeAboutHTMLEscapingOnPurpose(t *testing.T) {
+	d := newTestDocs(t)
+	const short = "serve on http://127.0.0.1:<port> & wait"
+	s := Surface{Commands: []Command{{Path: "tool", Use: "tool", Short: short, Runnable: true}}}
+
+	raw, err := d.renderJSON(s)
+	require.NoError(t, err)
+	md := string(d.renderMarkdown(s))
+
+	assert.Contains(t, string(raw), short,
+		"JSON carries the help string byte for byte: its consumers diff it against committed goldens")
+	assert.NotContains(t, string(raw), `\u003c`, "no Go HTML escaping in the JSON artifact")
+	assert.NotContains(t, string(raw), `\u0026`, "and none of Go's ampersand escaping either")
+	assert.NotContains(t, string(raw), "&lt;", "and no markdown escaping: that belongs to the other renderer")
+
+	assert.Contains(t, md, "serve on http://127.0.0.1:&lt;port&gt; & wait",
+		"markdown escapes the brackets, because there the raw form is read as markup and vanishes")
+	assert.NotContains(t, md, short, "the raw help string must not reach the rendered page")
+	assert.NotContains(t, md, "&amp;", "the ampersand stays bare on both sides: escaping it is what double-escapes")
+}

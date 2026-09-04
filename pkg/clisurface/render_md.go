@@ -55,7 +55,7 @@ func (d *Docs) renderMarkdown(s Surface) []byte {
 func writeCommand(b *strings.Builder, c *Command) {
 	writeLines(b, "", "## "+code(c.Path), "")
 	if c.Short != "" {
-		writeLines(b, c.Short, "")
+		writeLines(b, escapeAngles(c.Short), "")
 	}
 
 	writeLines(b, "- Usage: "+code(usage(c)))
@@ -64,7 +64,7 @@ func writeCommand(b *strings.Builder, c *Command) {
 		writeLines(b, "- Hidden: not shown in `--help` output")
 	}
 	if c.Deprecated != "" {
-		writeLines(b, "- Deprecated: "+c.Deprecated)
+		writeLines(b, "- Deprecated: "+escapeAngles(c.Deprecated))
 	}
 	if !c.Runnable {
 		writeLines(b, "- Requires a subcommand")
@@ -84,9 +84,11 @@ func writeCommand(b *strings.Builder, c *Command) {
 	}
 
 	if c.Example != "" {
-		writeLines(b, "", "### Examples", "", "```bash")
-		writeLines(b, strings.Split(strings.TrimRight(dedent(c.Example), "\n"), "\n")...)
-		writeLines(b, "```")
+		body := strings.TrimRight(dedent(c.Example), "\n")
+		f := fence(body)
+		writeLines(b, "", "### Examples", "", f+"bash")
+		writeLines(b, strings.Split(body, "\n")...)
+		writeLines(b, f)
 	}
 }
 
@@ -133,16 +135,20 @@ func renderSubcommandRegion(s Surface) string {
 		}
 	}
 
+	rows := make([]string, 0, len(children))
+	for _, c := range children {
+		rows = append(rows, fmt.Sprintf("%s %-*s # %s", root, width, name(c.Path), c.Short))
+	}
+
 	var b strings.Builder
+	f := fence(strings.Join(rows, "\n"))
 	writeLines(&b,
 		fmt.Sprintf("%s organizes its functionality into these focused subcommands:", titleFirst(root)),
 		"",
-		"```bash",
+		f+"bash",
 	)
-	for _, c := range children {
-		writeLines(&b, fmt.Sprintf("%s %-*s # %s", root, width, name(c.Path), c.Short))
-	}
-	writeLines(&b, "```")
+	writeLines(&b, rows...)
+	writeLines(&b, f)
 	return b.String()
 }
 
@@ -295,21 +301,103 @@ func aliasCell(c *Command) string {
 	return strings.Join(out, ", ")
 }
 
-// code wraps s in markdown code ticks.
-func code(s string) string { return "`" + s + "`" }
+// code wraps s in markdown code ticks, widening the delimiter when s itself
+// holds a backtick. Widening is not cosmetic: a cobra Use string can carry a
+// backtick, and a plain single-tick wrap would let it close the span early --
+// putting the rest of the value, angle-bracket placeholders included, back into
+// live markdown and defeating the very containment the code span was for. A
+// value containing a backtick needs a longer delimiter plus padding, which is
+// how markdown nests code spans.
+func code(s string) string {
+	if !strings.Contains(s, "`") {
+		return "`" + s + "`"
+	}
+	fence := "``"
+	for strings.Contains(s, fence) {
+		fence += "`"
+	}
+	return fence + " " + s + " " + fence
+}
+
+// fence returns the backtick delimiter to open and close a fenced block around
+// body: the standard three, widened to one more than the longest run of
+// backticks that starts a line of body.
+//
+// This is code's problem one level up, and it is the more damaging half. A
+// fenced block is closed by a line whose backtick run is at least as long as
+// the one that opened it, so a cobra Example -- or a Short, which the README
+// subcommand region prints inside a fence -- carrying a line of three backticks
+// ENDS the block there. Everything after it stops being example text and
+// becomes live markdown: the remainder of the value renders as headings and
+// emphasis, and any raw HTML in it is handed to the renderer, which is the same
+// "<base>" hazard escapeAngles exists to head off, except that inside a fence
+// nothing escaped it because nothing needed to. Opening with a longer delimiter
+// makes the content's own runs too short to close the block, which is how
+// markdown nests fences.
+//
+// Leading whitespace is trimmed before measuring rather than bounded at the
+// three spaces CommonMark allows before a closing fence. That over-counts an
+// indented run that could not have closed anything, which costs one backtick of
+// delimiter width in the rendered output and never a missed breakout -- the
+// right direction for a bound this cheap. Backtick runs that do not start a
+// line are ignored, because a closing fence must begin its line; an inline span
+// mid-line therefore leaves the standard three untouched, and the common case
+// renders byte-identically to a fixed fence.
+func fence(body string) string {
+	longest := 0
+	for _, l := range strings.Split(body, "\n") {
+		l = strings.TrimLeft(l, " \t")
+		if run := len(l) - len(strings.TrimLeft(l, "`")); run > longest {
+			longest = run
+		}
+	}
+	return strings.Repeat("`", max(3, longest+1))
+}
 
 // cell makes arbitrary help text safe inside a markdown table cell.
 func cell(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "|", "\\|")
+	s = escapeAngles(s)
 	return strings.TrimSpace(s)
+}
+
+// escapeAngles neutralizes the HTML angle brackets in cobra-supplied prose.
+//
+// Markdown passes raw HTML through, and cobra help strings routinely carry
+// argument placeholders spelled "<domain>". An unknown tag has no inner text, so
+// the placeholder does not merely render oddly -- it VANISHES, and the generated
+// reference then silently documents a description or a default other than the
+// one it was handed. That is the correctness bug. A placeholder that happens to
+// name a real void element, "<base>" being the motivating case, is worse still:
+// GitHub's sanitizer strips it, but a renderer that does not sanitize -- a local
+// preview, mkdocs, a published docs site -- acts on it, and <base> retargets
+// how every relative link on the page resolves.
+//
+// Only "<" and ">" are escaped, deliberately not "&". Escaping "&" would turn a
+// help string that already reads "&lt;" into "&amp;lt;", and a lone "&" is
+// rendered literally by CommonMark regardless, so the extra churn buys nothing.
+// The consequence, accepted knowingly, is that a help string containing a
+// literal "&lt;" still renders as "<": this escaping is safe, not round-trip
+// faithful. The two replacements are order-independent, because neither "&lt;"
+// nor "&gt;" contains an angle bracket and so neither can feed the other.
+//
+// Text destined for a code span or a fenced block must NOT come through here:
+// inside a span "&lt;" renders as those four literal characters. Angle brackets
+// are already inert there, which is why usage(), the Default column and the
+// Examples fence are left alone.
+func escapeAngles(s string) string {
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 // codeCell wraps a value in code ticks safely inside a table cell. Defaults and flag
 // types come from cobra, so they can hold a pipe, a newline or a backtick -- any of
 // which breaks the row, and a broken row silently drops a flag from the reference.
-// A value containing a backtick needs a longer delimiter plus padding, which is how
-// markdown nests code spans.
+// The backtick is code's problem, so the delimiter widening lives there; what this
+// adds is the row-level handling a code span cannot express, since a pipe closes the
+// table cell even from inside one.
 func codeCell(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "|", "\\|")
@@ -317,14 +405,7 @@ func codeCell(s string) string {
 	if s == "" {
 		return ""
 	}
-	if !strings.Contains(s, "`") {
-		return code(s)
-	}
-	fence := "``"
-	for strings.Contains(s, fence) {
-		fence += "`"
-	}
-	return fence + " " + s + " " + fence
+	return code(s)
 }
 
 // anchor is the GitHub heading anchor for a "## `path`" heading.

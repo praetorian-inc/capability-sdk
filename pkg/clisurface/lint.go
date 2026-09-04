@@ -10,6 +10,39 @@ import (
 	"strings"
 )
 
+// usePlaceholders are the Use-string fields that describe the shape of an
+// invocation rather than sketching a positional argument, so hasArgSketch must
+// not read any of them as one.
+//
+// "[flags]" is cobra's own, appended verbatim to the usage line of any command
+// that has flags. The other four mean "a subcommand goes here": cobra writes
+// "[command]" itself -- in its usage template, and as the Use of the help
+// command it generates -- and the angle-bracket and "subcommand" spellings are
+// the same convention written by hand, which this codebase's Use strings mix
+// freely for real arguments too ("[owner/repo]" beside "<domain>").
+//
+// Reading "[command]" as an argument was a measured false negative, and the
+// worst-placed one available: a command whose Use says a subcommand goes here
+// is exactly where a misspelled subcommand in prose is most certainly a typo,
+// and takesPositional went silent there. With "config [command]" runnable over
+// a child "show", "tool config shwo" drew no finding at all.
+//
+// Membership is case-folded. Cobra emits only the lowercase spellings, but the
+// four hand-written ones carry no such guarantee, and "[COMMAND]" names a
+// subcommand slot just as plainly as "[command]" does. Folding errs toward
+// reporting -- a skipped field makes hasArgSketch answer false, which keeps the
+// linter talking -- which is the recoverable direction hasArgSketch already
+// documents: the porter clears a report by naming the argument in Use, and
+// gains a truer "--help" doing it, whereas silence hides a real typo with
+// nothing to signal that it did.
+var usePlaceholders = map[string]bool{
+	"[flags]":      true,
+	"[command]":    true,
+	"<command>":    true,
+	"[subcommand]": true,
+	"<subcommand>": true,
+}
+
 // longFlagPattern matches a long flag token in prose or in a Go comment.
 // Group 2 is the token. The leading group requires the dashes to start a word,
 // so neither "// -----" rule comments, nor "--" used as a dash-dash separator,
@@ -377,20 +410,25 @@ func lintInvocation(s Surface, file string, line int, argv []string, allow Allow
 			}
 		case resolving:
 			child := resolveChild(s, cmd.Path, arg)
-			switch {
-			case child != nil:
+			if child != nil {
 				cmd = child
-			case len(s.Children(cmd.Path)) > 0:
+				break
+			}
+			// Not a subcommand, so from here on argv holds this command's
+			// arguments. That is true whether or not the token is worth
+			// reporting, so resolving stops on every path out of here: were it
+			// left on, a later argument spelling a real subcommand name would
+			// advance cmd and every flag in the line would then be judged
+			// against the wrong command.
+			if reportsBogusSubcommand(s, cmd) {
 				issues = append(issues, Issue{
 					File: file, Line: line, Token: arg, Command: cmd.Path,
 					Reason:     "is not a subcommand of",
 					Suggestion: nearestCommand(s, cmd.Path, arg),
 					Subcommand: true,
 				})
-				resolving = false
-			default:
-				resolving = false
 			}
+			resolving = false
 		}
 	}
 
@@ -538,6 +576,84 @@ func checkShortFlags(cmd *Command, file string, line int, arg string, allow Allo
 // cluster, and the rest of it must not be validated.
 func isShorthandRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+}
+
+// reportsBogusSubcommand reports whether a positional that is not one of cmd's
+// children is worth reporting as a misspelled subcommand.
+//
+// Two conditions must hold. cmd must have children, or there is no subcommand
+// to have misspelled and nothing to suggest. And cmd must not legitimately
+// take a positional itself: when a command both dispatches to children and
+// accepts an argument of its own, a non-child positional is as likely to be
+// that argument as a typo, and reporting it forces correct documentation to be
+// rewritten into something false.
+//
+// Two limitations follow, stated rather than hidden. A genuinely misspelled
+// subcommand of a parent that both runs and sketches an argument is no longer
+// reported: with "github [owner/repo]" runnable, "tool github tagets" is
+// accepted. And a command that really takes a positional but does not sketch
+// it in Use is still reported, because its own declared interface says it
+// takes none. Everything else stays covered, the root included -- see
+// takesPositional for why that mattered enough to shape the predicate.
+func reportsBogusSubcommand(s Surface, cmd *Command) bool {
+	return len(s.Children(cmd.Path)) > 0 && !takesPositional(cmd)
+}
+
+// takesPositional reports whether cmd's own declared interface says it accepts
+// a positional argument.
+//
+// The surface does not carry cobra's Args validator, which is the authoritative
+// answer, and adding it would change the JSON schema and invalidate every
+// consumer's committed docs/cli-surface.json golden. So this reads the two
+// signals the surface already has, and needs both.
+//
+// Runnable alone is not enough, and that is measured rather than assumed: a
+// root command with a RunE and subcommands is the overwhelmingly common cobra
+// shape, so treating "runnable" as "takes an argument" would suppress mistyped
+// subcommand reports at the top level of nearly every CLI -- precisely where a
+// typo in documentation is most likely and where nearestCommand pays off most.
+//
+// The second signal is the Use string, which is cobra's own user-facing
+// argument sketch: "github [owner/repo]" documents a positional, "version"
+// documents none. The recognized shapes are enumerated in hasArgSketch below.
+func takesPositional(cmd *Command) bool {
+	return cmd.Runnable && hasArgSketch(cmd.Use)
+}
+
+// hasArgSketch reports whether a cobra Use string sketches a positional
+// argument after the command name.
+//
+// The recognized shapes, exhaustively: the first field is the command's own
+// name and is dropped; a field beginning with "-" is a flag, not a positional;
+// a field in usePlaceholders describes the invocation's shape rather than an
+// argument ("[flags]", and the four spellings of "a subcommand goes here") and
+// is not a positional; every other non-empty field is an argument sketch,
+// whatever its punctuation, so "[owner/repo]", "<domain>", "TARGET" and a bare
+// "path" all count.
+//
+// Nothing here can panic or mis-slice: strings.Fields tolerates any spacing and
+// returns an empty slice for an empty or all-space Use, which yields false.
+// False is also the deliberate default for a Use string this does not
+// understand, because false means the linter keeps reporting. That is the safe
+// direction for an unrecognized shape: an under-documented Use is itself a
+// documentation defect -- cobra prints Use verbatim in help output, so a
+// command whose sketch omits an argument it really takes is already lying to
+// its users -- and both ways of clearing the resulting report (correct the
+// prose, or document the argument in Use) leave the CLI's documentation more
+// honest than it was. Silence, by contrast, cannot be recovered from: it hides
+// a real typo with nothing to signal that it did.
+func hasArgSketch(use string) bool {
+	fields := strings.Fields(use)
+	if len(fields) < 2 {
+		return false
+	}
+	for _, f := range fields[1:] {
+		if strings.HasPrefix(f, "-") || usePlaceholders[strings.ToLower(f)] {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // resolveChild resolves one path segment to a direct subcommand of path, by

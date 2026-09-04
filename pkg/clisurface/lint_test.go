@@ -1,6 +1,7 @@
 package clisurface
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -658,4 +659,288 @@ func TestLintReportCountsTheScopeItWasGiven(t *testing.T) {
 
 	assert.Contains(t, report,
 		"Linted 2 markdown file(s) [README.md, docs/CLI.md] and 3 Go file(s) under 2 Go dir(s) [cmd, internal], with 1 token(s) allowlisted.")
+}
+
+// --- positional arguments vs. misspelled subcommands ------------------------
+
+// newPositionalSurface fills out the 2x2 of Runnable x hasArgSketch among
+// commands that HAVE children, which is the only quadrant reportsBogusSubcommand
+// looks at. Each cell is a real cobra shape:
+//
+//	titus github  runnable, sketches [owner/repo]  -- dispatches and takes an arg
+//	titus notes   runnable, no sketch              -- the common root-like shape
+//	titus report  not runnable, sketches <format>  -- a grouping parent whose Use
+//	                                                  mis-advertises an argument
+//	titus group   not runnable, no sketch          -- the classic grouping parent
+//
+// It is hand-built because a cobra tree cannot express "not runnable yet
+// sketches an argument" without also giving the command a RunE.
+func newPositionalSurface() Surface {
+	return Surface{Commands: []Command{
+		{Path: "titus", Use: "titus", Short: "the tool", Runnable: true},
+
+		{Path: "titus github", Use: "github [owner/repo]", Short: "scan one repository", Runnable: true},
+		{Path: "titus github targets", Use: "targets", Short: "list discovered targets", Runnable: true},
+
+		{Path: "titus notes", Use: "notes", Short: "manage notes", Runnable: true},
+		{Path: "titus notes list", Use: "list", Short: "list notes", Runnable: true},
+
+		{Path: "titus report", Use: "report <format>", Short: "reporting commands"},
+		{Path: "titus report csv", Use: "csv", Short: "emit csv", Runnable: true},
+
+		{Path: "titus group", Use: "group", Short: "a grouping parent"},
+		{Path: "titus group leaf", Use: "leaf", Short: "a leaf", Runnable: true},
+	}}
+}
+
+// TestLintMarkdownAcceptsAPositionalOnAParentThatTakesOne is the false positive
+// that was measured on titus. Its README documents "titus github owner/repo",
+// which is correct: the command dispatches to subcommands AND takes an
+// owner/repo argument of its own. The linter reported the argument as a
+// misspelled subcommand, and there was no escape -- ParseAllowlist rejects any
+// entry that does not start with "-" -- so the only way to clear the report was
+// to rewrite a true documentation line into a false one.
+func TestLintMarkdownAcceptsAPositionalOnAParentThatTakesOne(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDocs(t)
+	s := newPositionalSurface()
+
+	github, ok := s.Command("titus github")
+	require.True(t, ok)
+	require.True(t, github.Runnable, "it has a RunE of its own")
+	require.Equal(t, "github [owner/repo]", github.Use, "and its Use declares the argument")
+	require.NotEmpty(t, s.Children("titus github"), "and it dispatches to children too: that is the shape that misfired")
+
+	issues := d.LintMarkdown(s, "README.md", "```bash\ntitus github owner/repo\n```", emptyAllowlist(t))
+	assert.Empty(t, issues, "a documented positional on a command that declares one is not a misspelled subcommand: %v", tokensOf(issues))
+
+	_, err := d.ParseAllowlist("owner/repo\n")
+	require.Error(t, err, "and the allowlist could never have suppressed it: it accepts flag tokens only")
+}
+
+// TestLintMarkdownReportsABogusSubcommandOnlyWhenTheParentTakesNoArgument walks
+// every cell of the Runnable x hasArgSketch table. Both conjuncts of
+// takesPositional are load-bearing and each has a cell that fails alone if it is
+// dropped: widening to "Runnable" alone breaks the notes row, and narrowing to
+// "hasArgSketch" alone breaks the report row.
+func TestLintMarkdownReportsABogusSubcommandOnlyWhenTheParentTakesNoArgument(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		command        string
+		line           string
+		wantToken      string // "" means the positional must be accepted in silence
+		wantSuggestion string
+	}{
+		{
+			name:    "runnable and sketches an argument: the positional is that argument",
+			command: "titus github",
+			line:    "titus github owner/repo",
+		},
+		{
+			name:      "runnable but sketches nothing: a positional is still a typo",
+			command:   "titus notes",
+			line:      "titus notes mynote",
+			wantToken: "mynote",
+		},
+		{
+			name:           "sketches an argument but is not runnable: still a typo",
+			command:        "titus report",
+			line:           "titus report cvs",
+			wantToken:      "cvs",
+			wantSuggestion: "csv",
+		},
+		{
+			name:           "neither runnable nor sketching: the classic grouping parent",
+			command:        "titus group",
+			line:           "titus group leef",
+			wantToken:      "leef",
+			wantSuggestion: "leaf",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newTestDocs(t)
+			s := newPositionalSurface()
+
+			cmd, ok := s.Command(tc.command)
+			require.True(t, ok)
+			require.NotEmpty(t, s.Children(cmd.Path), "every cell of this table needs a parent that has children")
+
+			issues := d.LintMarkdown(s, "README.md", "```bash\n"+tc.line+"\n```", emptyAllowlist(t))
+
+			if tc.wantToken == "" {
+				assert.Empty(t, issues, "unexpected findings: %v", tokensOf(issues))
+				return
+			}
+
+			require.Len(t, issues, 1, "findings: %v", tokensOf(issues))
+			assert.Equal(t, tc.wantToken, issues[0].Token)
+			assert.Equal(t, tc.command, issues[0].Command, "the finding is blamed on the resolved parent")
+			assert.True(t, issues[0].Subcommand, "and it is a subcommand finding, so no flag allowlist is offered")
+			assert.Contains(t, issues[0].Reason, "is not a subcommand of")
+			assert.Equal(t, tc.wantSuggestion, issues[0].Suggestion,
+				"the nearest-subcommand suggestion is the finding's most valuable output and must survive the fix")
+		})
+	}
+}
+
+// TestLintMarkdownStillCatchesATypoUnderARunnableRoot is the exact regression a
+// first attempt at this fix introduced: keying on "has children && !Runnable"
+// looked right and was not. A root with a RunE and subcommands is the
+// overwhelmingly common cobra shape -- the fixture root in surface_test.go is
+// one -- so Runnable alone silently switched off top-level typo detection for
+// nearly every CLI, which is the one place a documentation typo is most likely
+// and where the suggestion pays off most.
+//
+// Runnable is necessary but not sufficient: the command must also declare an
+// argument before a positional is read as one.
+func TestLintMarkdownStillCatchesATypoUnderARunnableRoot(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDocs(t)
+	s := Walk(newTestTree())
+
+	root, ok := s.Command(s.Root())
+	require.True(t, ok)
+	require.True(t, root.Runnable, "the fixture root runs")
+	require.NotEmpty(t, s.Children(root.Path), "and dispatches: the shape that broke the first attempt")
+	require.False(t, hasArgSketch(root.Use), "but it declares no argument, so a positional is not one")
+
+	issues := d.LintMarkdown(s, "README.md", "```bash\ntool groop\n```", emptyAllowlist(t))
+
+	require.Len(t, issues, 1, "findings: %v", tokensOf(issues))
+	assert.Equal(t, "groop", issues[0].Token)
+	assert.Equal(t, "tool", issues[0].Command)
+	assert.Equal(t, "group", issues[0].Suggestion)
+}
+
+// TestHasArgSketchRecognizesBothArgumentConventions covers the shapes cobra Use
+// strings actually take. Neither convention is dominant in this codebase --
+// titus writes "[owner/repo]" and umber writes "<name>" -- and the two tokens
+// cobra itself contributes ("[flags]" and a bare shorthand) must not read as
+// arguments, or every command with a flag would accept any positional.
+func TestHasArgSketchRecognizesBothArgumentConventions(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		use  string
+		want bool
+	}{
+		{use: "github [owner/repo]", want: true},
+		{use: "scan <domain>", want: true},
+		{use: "cp <src> <dst>", want: true},
+		{use: "scan [flags] <domain>", want: true},
+		{use: "scan domain", want: true},
+
+		{use: "", want: false},
+		{use: "   ", want: false},
+		{use: "scan", want: false},
+		{use: "scan [flags]", want: false},
+		{use: "scan -j", want: false},
+		{use: "scan --json", want: false},
+		{use: "scan [flags] --json", want: false},
+	} {
+		t.Run(strconv.Quote(tc.use), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, hasArgSketch(tc.use))
+		})
+	}
+}
+
+// TestLintMarkdownStopsResolvingAtTheFirstArgument pins the unconditional
+// "resolving = false" on every non-child path out of the arm. Once a token has
+// been read as an argument rather than a subcommand, later bare words are that
+// command's remaining arguments -- they must not advance the resolved command,
+// or every flag after them is judged against the wrong one.
+func TestLintMarkdownStopsResolvingAtTheFirstArgument(t *testing.T) {
+	t.Parallel()
+
+	t.Run("after an accepted argument", func(t *testing.T) {
+		t.Parallel()
+
+		d := newTestDocs(t)
+		s := newPositionalSurface()
+
+		issues := d.LintMarkdown(s, "README.md",
+			"```bash\ntitus github owner/repo targets --gone\n```", emptyAllowlist(t))
+
+		require.Len(t, issues, 1,
+			"owner/repo is accepted, and the child-named token after it is a second argument: %v", tokensOf(issues))
+		assert.Equal(t, "--gone", issues[0].Token)
+		assert.Equal(t, "titus github", issues[0].Command,
+			"with resolving left on, targets would advance the command and --gone would be blamed on titus github targets")
+	})
+
+	t.Run("after a reported typo", func(t *testing.T) {
+		t.Parallel()
+
+		d := newTestDocs(t)
+		s := Walk(newTestTree())
+
+		issues := d.LintMarkdown(s, "README.md",
+			"```bash\ntool somearg group --gone\n```", emptyAllowlist(t))
+
+		require.Len(t, issues, 2, "findings: %v", tokensOf(issues))
+		assert.Equal(t, "somearg", issues[0].Token)
+		assert.Equal(t, "tool", issues[0].Command)
+		assert.Equal(t, "--gone", issues[1].Token)
+		assert.Equal(t, "tool", issues[1].Command,
+			"reporting a token does not consume it as a subcommand either: the flag is still judged against tool")
+	})
+}
+
+// TestLintMarkdownKnownLimitationTypoUnderAnArgumentTakingParent records a real
+// cost of this fix rather than an accident. Under a parent that both runs and
+// declares an argument, a genuine subcommand typo is now indistinguishable from
+// that argument and is accepted in silence.
+//
+// The trade is deliberate and asymmetric in the right direction: a missed typo
+// leaves documentation that a reader can still follow, while the false positive
+// it replaces pushed porters into rewriting correct documentation into incorrect
+// documentation. Narrowing it would need cobra's Args validator in the surface,
+// which surface.go cannot gain without invalidating every consumer's committed
+// golden.
+func TestLintMarkdownKnownLimitationTypoUnderAnArgumentTakingParent(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDocs(t)
+	s := newPositionalSurface()
+
+	require.NotEmpty(t, s.Children("titus github"), "targets really is a subcommand, so tagets really is a typo")
+
+	issues := d.LintMarkdown(s, "README.md", "```bash\ntitus github tagets\n```", emptyAllowlist(t))
+	assert.Empty(t, issues,
+		"known limitation: indistinguishable from the [owner/repo] argument the command declares: %v", tokensOf(issues))
+}
+
+// TestLintMarkdownKnownLimitationUndeclaredPositionalIsStillReported records the
+// other half of the trade. The fix reads the Use string, so a command that
+// really takes a positional but does not sketch it there is still reported --
+// the false positive survives for exactly those commands.
+//
+// This one has a cheap fix available to the porter, and that is why it is
+// acceptable: adding the argument to Use is a one-line change that improves
+// "--help" at the same time. Widening the predicate to drop the sketch
+// requirement is what must not happen, and the notes row of the 2x2 above fails
+// if it does.
+func TestLintMarkdownKnownLimitationUndeclaredPositionalIsStillReported(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDocs(t)
+	s := newPositionalSurface()
+
+	notes, ok := s.Command("titus notes")
+	require.True(t, ok)
+	require.True(t, notes.Runnable)
+	require.False(t, hasArgSketch(notes.Use), "the command takes a note name, but its Use never says so")
+
+	issues := d.LintMarkdown(s, "README.md", "```bash\ntitus notes mynote\n```", emptyAllowlist(t))
+
+	require.Len(t, issues, 1, "known limitation: an undeclared positional still reads as a typo: %v", tokensOf(issues))
+	assert.Equal(t, "mynote", issues[0].Token)
+	assert.Empty(t, issues[0].Suggestion, "with no near-enough child name, the finding carries no suggestion")
 }
