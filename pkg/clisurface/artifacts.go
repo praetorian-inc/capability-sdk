@@ -81,6 +81,7 @@ func (d *Docs) artifacts(repoRoot string, s Surface) ([]artifact, error) {
 	if isIrregular(readmePath) {
 		return nil, fmt.Errorf("refusing to read %s: it exists and is not a regular file", d.cfg.READMEPath)
 	}
+	// #nosec G304 -- readmePath is repoRoot joined with Config.READMEPath, which New rejects when absolute, backslashed or carrying a ".." element, and the isIrregular guard above refuses anything that is not a regular file.
 	readme, err := os.ReadFile(readmePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", d.cfg.READMEPath, err)
@@ -121,12 +122,14 @@ func (d *Docs) Write(repoRoot string, s Surface) error {
 	}
 	for i := range artifacts {
 		path := filepath.Join(repoRoot, artifacts[i].Path)
+		// #nosec G301 -- these directories hold committed repository documentation: 0o755 is byte-identical to the generator this ports, git tracks no directory mode, and 0o750 would break group traversal on shared CI checkouts.
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("creating directory for %s: %w", artifacts[i].Path, err)
 		}
 		if isIrregular(path) {
 			return fmt.Errorf("refusing to write %s: it already exists and is not a regular file", artifacts[i].Path)
 		}
+		// #nosec G306 -- these are tracked, world-readable documentation files; os.WriteFile applies the mode only on creation, so 0o644 is exactly what git checks out, where 0o600 would leave a developer's regenerated README owner-only.
 		if err := os.WriteFile(path, artifacts[i].Content, 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", artifacts[i].Path, err)
 		}
@@ -195,6 +198,7 @@ func (d *Docs) CheckArtifacts(repoRoot string, s Surface) ([]Staleness, error) {
 		if isIrregular(path) {
 			return nil, fmt.Errorf("refusing to read %s: it exists and is not a regular file", artifacts[i].Path)
 		}
+		// #nosec G304 -- path is repoRoot joined with an artifact path this package derived from the validated Config, and the isIrregular guard above refuses anything that is not a regular file.
 		onDisk, readErr := os.ReadFile(path)
 		if readErr != nil {
 			stale = append(stale, d.stampStaleness(Staleness{
@@ -251,6 +255,7 @@ func (d *Docs) LoadAllowlist(repoRoot string) (Allowlist, error) {
 	if isIrregular(allowlistPath) {
 		return Allowlist{}, fmt.Errorf("refusing to read %s: it exists and is not a regular file", d.cfg.AllowlistPath)
 	}
+	// #nosec G304 -- allowlistPath is repoRoot joined with Config.AllowlistPath, held to the same validation as every other path field, and the isIrregular guard above refuses anything that is not a regular file.
 	content, err := os.ReadFile(allowlistPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -285,6 +290,7 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 		return nil, LintScope{}, err
 	}
 	for _, rel := range docs {
+		// #nosec G304 -- rel came from the documentation walk below repoRoot, which filepath.WalkDir selects by lstat and this package filters to regular files.
 		content, readErr := os.ReadFile(filepath.Join(repoRoot, rel))
 		if readErr != nil {
 			return nil, LintScope{}, fmt.Errorf("reading %s: %w", rel, readErr)
@@ -300,6 +306,7 @@ func (d *Docs) LintRepo(repoRoot string, s Surface, allow Allowlist) ([]Issue, L
 	sort.Strings(skipped)
 	skipped = slices.Compact(skipped)
 	for _, rel := range goFiles {
+		// #nosec G304 -- rel has the same provenance as the markdown loop above: a filepath.WalkDir below repoRoot, filtered to regular files by lstat.
 		src, readErr := os.ReadFile(filepath.Join(repoRoot, rel))
 		if readErr != nil {
 			return nil, LintScope{}, fmt.Errorf("reading %s: %w", rel, readErr)
