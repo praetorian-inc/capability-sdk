@@ -632,3 +632,94 @@ func TestProbeSurvivesAGuardThatReadsTheContext(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, flag.Rejected, "the rejection must survive a guard that touches the context")
 }
+
+// TestProbeSurvivesAPreRunEUsingPflagsTypedAccessors settles a review finding
+// that claimed frozenValue "strips interfaces", so a guard calling
+// cmd.Flags().GetString would fail against the shadow command and cost the
+// command its rejections. It does not: frozenValue embeds pflag.Value, which
+// promotes Type() and String(), and pflag's typed accessors go through
+// getFlagType -- it compares Value.Type() against the name of the type it was
+// asked for and then parses Value.String(), rather than type-asserting the
+// Value to a concrete pflag type. Only Set is overridden, and no accessor
+// calls Set.
+//
+// The claim is worth a test rather than an argument because the failure it
+// describes would be silent: a guard whose accessor errored would return that
+// error from the baseline probe, probeRejections would read the baseline as
+// unprobeable, and every rejection on the command would vanish from the
+// surface with nothing to show it had happened.
+func TestProbeSurvivesAPreRunEUsingPflagsTypedAccessors(t *testing.T) {
+	root := &cobra.Command{Use: "tool", RunE: func(*cobra.Command, []string) error { return nil }}
+	root.PersistentFlags().Duration("timeout", 10*time.Second, "per-target timeout")
+
+	kid := &cobra.Command{Use: "kid", RunE: func(*cobra.Command, []string) error { return nil }}
+	kid.Flags().StringP("target", "t", "host:8443", "target host:port")
+	kid.Flags().Bool("insecure", true, "skip verification")
+	kid.Flags().Int("retries", 3, "attempts per target")
+
+	// Every accessor call's error and value is recorded rather than asserted
+	// inline: PreRunE runs once for the baseline and once per resolved flag, and
+	// an assertion firing inside a probed guard would report against a goroutine
+	// the recover in probeRejections is about to swallow.
+	type reading struct {
+		target   string
+		insecure bool
+		retries  int
+		timeout  time.Duration
+		errs     []error
+	}
+	var readings []reading
+	kid.PreRunE = func(c *cobra.Command, _ []string) error {
+		var r reading
+		var err error
+
+		r.target, err = c.Flags().GetString("target")
+		r.errs = append(r.errs, err)
+		r.insecure, err = c.Flags().GetBool("insecure")
+		r.errs = append(r.errs, err)
+		r.retries, err = c.Flags().GetInt("retries")
+		r.errs = append(r.errs, err)
+		// The inherited flag matters separately: it reaches the shadow command as a
+		// copy of the root's persistent flag, so it exercises the same path from a
+		// different origin.
+		r.timeout, err = c.Flags().GetDuration("timeout")
+		r.errs = append(r.errs, err)
+		readings = append(readings, r)
+
+		if c.Flags().Changed("timeout") {
+			return fmt.Errorf("--timeout is not valid here; use --retries")
+		}
+		return nil
+	}
+	root.AddCommand(kid)
+
+	s := Walk(root)
+
+	require.NotEmpty(t, readings, "the guard must actually have been probed")
+	for i, r := range readings {
+		for _, err := range r.errs {
+			require.NoError(t, err, "accessor failed on probe %d", i)
+		}
+		assert.Equal(t, "host:8443", r.target, "GetString reads the real default through frozenValue")
+		assert.True(t, r.insecure, "GetBool reads a non-string default")
+		assert.Equal(t, 3, r.retries, "GetInt reads a non-string default")
+		assert.Equal(t, 10*time.Second, r.timeout, "GetDuration reads the inherited flag's default")
+	}
+
+	cmd, ok := s.Command("tool kid")
+	require.True(t, ok)
+	timeout, ok := cmd.Flag("timeout")
+	require.True(t, ok)
+	assert.True(t, timeout.Rejected,
+		"a guard that reads its flags with typed accessors still yields its rejection")
+	assert.Equal(t, "--timeout is not valid here; use --retries", timeout.RejectedReason)
+	for _, name := range []string{"target", "insecure", "retries"} {
+		flag, ok := cmd.Flag(name)
+		require.True(t, ok)
+		assert.False(t, flag.Rejected, "%s is not rejected, so the probe must not say it is", name)
+	}
+
+	assert.Equal(t, "host:8443", kid.Flags().Lookup("target").Value.String(),
+		"and the live tree is untouched")
+	assert.False(t, root.PersistentFlags().Lookup("timeout").Changed)
+}
