@@ -297,18 +297,21 @@ func (d *Docs) lintedMarkdownFiles(repoRoot string) ([]string, error) {
 }
 
 // lintedGoFiles lists the Go files whose comments to check, sorted, alongside
-// the directories the walk was given.
+// the directories it actually opened to find them.
 //
 // The directories come back beside the files because [LintRepo] reports them as
 // coverage: a scope assembled from configuration instead would name a directory
-// this walk never opened.
+// this walk never opened. A configured directory that is not there is therefore
+// left out, while one that is there but holds no Go files stays in, contributing
+// zero files -- the first is absent coverage, the second is coverage that found
+// nothing, and only the second is a fact about the repository.
 func (d *Docs) lintedGoFiles(repoRoot string) (files, dirs []string, err error) {
 	for _, dir := range d.cfg.LintedGoDirs {
-		dirs = append(dirs, dir)
 		root := filepath.Join(repoRoot, dir)
 		if _, statErr := os.Stat(root); errors.Is(statErr, fs.ErrNotExist) {
 			continue
 		}
+		dirs = append(dirs, dir)
 		walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			switch {
 			case err != nil:

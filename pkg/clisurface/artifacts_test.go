@@ -341,10 +341,10 @@ func TestLintRepoReachesGoComments(t *testing.T) {
 }
 
 // TestLintRepoReportsTheScopeItActuallyWalked pins the scope to the walk rather
-// than to the configuration. pkg/ is configured and absent: the run must report
-// the directory it was given alongside the zero files it found there, because a
-// report that says only "no issues" is indistinguishable from a clean
-// repository.
+// than to the configuration. pkg/ is configured and absent: the run must leave
+// it out of the reported scope, because a directory nobody ever opened is not
+// coverage, and a report that names it as covered is worse than one that says
+// nothing -- it asserts a reach the run did not have.
 func TestLintRepoReportsTheScopeItActuallyWalked(t *testing.T) {
 	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"cmd", "pkg"} })
 	root := newFakeRepo(t, d)
@@ -366,13 +366,50 @@ func TestLintRepoReportsTheScopeItActuallyWalked(t *testing.T) {
 	assert.Empty(t, issues, "internal/ is not configured, so its defect is out of scope")
 
 	assert.Equal(t, []string{"README.md", "docs/CLI.md"}, scope.MarkdownFiles)
-	assert.Equal(t, []string{"cmd", "pkg"}, scope.GoDirs, "the directories the walk was given")
+	assert.Equal(t, []string{"cmd"}, scope.GoDirs, "the directories the walk actually opened")
 	assert.Equal(t, []string{"cmd/tool/main.go"}, scope.GoFiles, "the files the walk actually found")
 	assert.Equal(t, allow, scope.Allowlist)
 
 	assert.Contains(t, LintReport(issues, scope),
-		"Linted 2 markdown file(s) [README.md, docs/CLI.md] and 1 Go file(s) under 2 Go dir(s) [cmd, pkg], with 1 token(s) allowlisted.",
+		"Linted 2 markdown file(s) [README.md, docs/CLI.md] and 1 Go file(s) under 1 Go dir(s) [cmd], with 1 token(s) allowlisted.",
 		"the report states the coverage the run really had")
+}
+
+// TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere is the counterpart the
+// scope test above cannot state on its own: a directory that is merely
+// configured must not be reported as walked, while one that exists and holds no
+// Go files must be, contributing zero files.
+//
+// The failure it locks out is silent. A consumer renames or typos an entry in
+// LintedGoDirs, Go-comment coverage for that tree drops to zero, and a scope
+// echoing the configuration back still names the directory as covered -- in
+// exactly the case where a silent gate is most dangerous.
+func TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere(t *testing.T) {
+	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"cmd", "empty", "typoed"} })
+	root := newFakeRepo(t, d)
+	s := Walk(newTestTree())
+	require.NoError(t, d.Write(root, s))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "tool"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "cmd", "tool", "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"), 0o644))
+	// "empty" exists and holds no Go file; "typoed" does not exist at all.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "empty", "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "empty", "notes.txt"), []byte("no Go here\n"), 0o644))
+
+	issues, scope, err := d.LintRepo(root, s, emptyAllowlist(t))
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+
+	assert.Equal(t, []string{"cmd", "empty"}, scope.GoDirs,
+		"an existing directory holding no Go files is still coverage; a missing one is not")
+	assert.NotContains(t, scope.GoDirs, "typoed",
+		"a directory the walk never opened must not be reported as walked")
+	assert.Equal(t, []string{"cmd/tool/main.go"}, scope.GoFiles)
+
+	assert.Contains(t, LintReport(issues, scope),
+		"1 Go file(s) under 2 Go dir(s) [cmd, empty]",
+		"the coverage sentence counts only the directories the walk reached")
 }
 
 func TestLoadAllowlist(t *testing.T) {
