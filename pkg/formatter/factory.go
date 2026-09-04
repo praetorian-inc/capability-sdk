@@ -49,4 +49,3 @@ func New(cfg Config) (Formatter, error) {
 		return nil, fmt.Errorf("unknown format: %s", cfg.Format)
 	}
 }
-
