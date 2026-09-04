@@ -110,6 +110,96 @@ func TestSpliceRejectsMarkersOnOneLine(t *testing.T) {
 	assert.Contains(t, err.Error(), "separate lines")
 }
 
+// TestSpliceRefusesToDeleteTextSharingTheClosingMarkersLine is the destructive
+// case. endIdx is the closing marker's own offset, so "note " sat inside the
+// span splice replaces: the word vanished on the next Write with no error
+// raised and nothing in the diff to explain it. The rejection has to quote the
+// text, because the whole failure mode was that nobody could see what was lost.
+func TestSpliceRefusesToDeleteTextSharingTheClosingMarkersLine(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Title", "", beginMarker("cli-aliases"), "body",
+		"note " + endMarker("cli-aliases"), "", "hand-written tail", "",
+	}, "\n")
+
+	out, err := splice(doc, "cli-aliases", "fresh")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be alone on its line")
+	assert.Contains(t, err.Error(), `"note "`, "the rejection names the text it refuses to delete")
+	assert.Contains(t, err.Error(), endMarker("cli-aliases"), "and the marker whose line to fix")
+	assert.Empty(t, out, "a rejected splice returns no document to write")
+}
+
+// TestSpliceRejectsTextSharingTheOpeningMarkersLine covers the other marker.
+// Text there is not deleted -- begin is measured from the newline that ends the
+// line -- but the layout leaves the region's first line ambiguous, and a
+// document that reads as though the note were part of the generated block is
+// exactly the confusion the closing-marker case turned destructive.
+func TestSpliceRejectsTextSharingTheOpeningMarkersLine(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Title", "", beginMarker("cli-aliases") + " (regenerated nightly)", "body",
+		endMarker("cli-aliases"), "",
+	}, "\n")
+
+	out, err := splice(doc, "cli-aliases", "fresh")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be alone on its line")
+	assert.Contains(t, err.Error(), `" (regenerated nightly)"`)
+	assert.Empty(t, out)
+}
+
+// TestSpliceRejectsAMarkerMidSentence is the single-occurrence case the count
+// guards cannot reach: prose that mentions a marker inline, or a code fence
+// showing one, is one occurrence and passes every earlier check. Splicing it
+// would replace from the end of the sentence to the closing marker, so the
+// sentence's own trailing half becomes the region's first line.
+func TestSpliceRejectsAMarkerMidSentence(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Title", "",
+		"The table between " + beginMarker("cli-aliases") + " and its closing marker is generated.",
+		endMarker("cli-aliases"), "",
+	}, "\n")
+
+	out, err := splice(doc, "cli-aliases", "fresh")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be alone on its line")
+	assert.Contains(t, err.Error(), "The table between ")
+	assert.Contains(t, err.Error(), " and its closing marker is generated.")
+	assert.Empty(t, out)
+}
+
+// TestSpliceRejectsAnIndentedMarker pins that whitespace is not an exception.
+// Indentation ahead of the closing marker is inside the replaced span like any
+// other text, so accepting it would silently reindent the marker on every
+// Write; and four spaces make the line a markdown indented code block, which
+// renders the marker as visible text rather than the comment it is meant to be.
+func TestSpliceRejectsAnIndentedMarker(t *testing.T) {
+	doc := strings.Join([]string{
+		"# Title", "", beginMarker("cli-aliases"), "body",
+		"    " + endMarker("cli-aliases"), "",
+	}, "\n")
+
+	out, err := splice(doc, "cli-aliases", "fresh")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be alone on its line")
+	assert.Empty(t, out)
+}
+
+// TestSpliceAcceptsCleanMarkersWithoutATrailingNewline keeps the new guard from
+// over-reaching at the end of a document: a closing marker that ends the file
+// has an empty remainder, not a missing line.
+func TestSpliceAcceptsCleanMarkersWithoutATrailingNewline(t *testing.T) {
+	doc := "# Title\n\n" + beginMarker("cli-aliases") + "\nbody\n" + endMarker("cli-aliases")
+
+	out, err := splice(doc, "cli-aliases", "fresh")
+
+	require.NoError(t, err)
+	assert.Equal(t, "# Title\n\n"+beginMarker("cli-aliases")+"\nfresh\n"+endMarker("cli-aliases"), out)
+}
+
 // TestSplicePreservesCRLF pins the newline convention. Splicing LF regions into a CRLF
 // checkout produced a mixed file, which is worse than either and shows up as noise in
 // every later diff.
