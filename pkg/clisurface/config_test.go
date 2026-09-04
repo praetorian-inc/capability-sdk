@@ -195,14 +195,23 @@ func TestValidate_RejectsAnEmptyPathField(t *testing.T) {
 	assert.Contains(t, err.Error(), "Config.JSONPath must not be empty")
 }
 
-func TestNew_RejectsAConfigurationThatWouldLintNothing(t *testing.T) {
-	msg := newTestDocsError(t, Config{
-		RegenerateCommand: testRegenerateCommand,
-		LintedMarkdown:    []string{},
-		LintedGoDirs:      []string{},
+// TestNew_AcceptsBothLintScopeHalvesEmpty pins the removal of a rejection that
+// was not true. Opting both configured halves out does not lint nothing: the
+// markdown walk seeds from LintedMarkdown and then walks DocsWalkRoot
+// unconditionally, so this configuration is "lint only the documentation tree",
+// which is a plausible posture rather than a mistake. [LintScope] is the honest
+// place to surface a run that really did reach nothing.
+func TestNew_AcceptsBothLintScopeHalvesEmpty(t *testing.T) {
+	d := newTestDocs(t, func(cfg *Config) {
+		cfg.LintedMarkdown = []string{}
+		cfg.LintedGoDirs = []string{}
 	})
+	cfg := d.Config()
 
-	assert.Contains(t, msg, "would lint nothing")
+	assert.NotNil(t, cfg.LintedMarkdown)
+	assert.Empty(t, cfg.LintedMarkdown)
+	assert.NotNil(t, cfg.LintedGoDirs)
+	assert.Empty(t, cfg.LintedGoDirs)
 }
 
 func TestNew_HonoursAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
@@ -371,4 +380,92 @@ func TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
 	assert.NotNil(t, second.LintedMarkdown, "the round trip must not turn the opt-out back into a default")
 	assert.Len(t, second.LintedMarkdown, 0)
 	assert.Equal(t, first, second, "a resolved Config must be a fixed point of New")
+}
+
+// TestNew_CleansSlicePathEntries is the C4 half of the cleaning rule. The
+// scalar path fields are stored verbatim because they are artifact content, but
+// a lint-scope entry is only ever a lookup key -- and left uncleaned,
+// "./docs/guide.md" and the "docs/guide.md" the documentation walk produces are
+// two distinct strings that slices.Compact cannot merge, so the file is linted
+// twice.
+func TestNew_CleansSlicePathEntries(t *testing.T) {
+	d := newTestDocs(t, func(cfg *Config) {
+		cfg.LintedMarkdown = []string{"./docs/guide.md", "docs/"}
+		cfg.LintedGoDirs = []string{"./pkg", "internal/"}
+	})
+	cfg := d.Config()
+
+	assert.Equal(t, []string{"docs/guide.md", "docs"}, cfg.LintedMarkdown)
+	assert.Equal(t, []string{"pkg", "internal"}, cfg.LintedGoDirs)
+}
+
+// TestNew_StillRejectsAnEmptySliceEntryAfterCleaning guards the interaction
+// between cleaning and validation: path.Clean("") is ".", which would turn the
+// empty entry validation rejects into a silent "walk the whole repository".
+// Cleaning therefore leaves an empty entry alone for validate to catch.
+func TestNew_StillRejectsAnEmptySliceEntryAfterCleaning(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{""}})
+
+	assert.Contains(t, msg, "Config.LintedGoDirs[0] must not be empty")
+}
+
+// TestNew_RejectsAPathContainingAngleBrackets is the S3 check. MarkdownPath is
+// interpolated raw into the generated alias region's body, so a path carrying a
+// region end marker splices a second marker into the README on the first Write.
+// Every later Write and the drift gate itself then hard-error with "found 2",
+// and hand repair is the only exit -- the same reason region names are held to
+// a charset.
+func TestNew_RejectsAPathContainingAngleBrackets(t *testing.T) {
+	for _, value := range []string{
+		"docs/CLI<!-- END generated: cli-aliases -->.md",
+		"docs/<CLI>.md",
+		"docs/a>b.md",
+	} {
+		t.Run(value, func(t *testing.T) {
+			msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, MarkdownPath: value})
+
+			assert.Contains(t, msg, "Config.MarkdownPath")
+			assert.Contains(t, msg, "must not contain")
+		})
+	}
+}
+
+func TestNew_RejectsAngleBracketsInALintScopeEntry(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedMarkdown: []string{"docs/<x>.md"}})
+
+	assert.Contains(t, msg, "Config.LintedMarkdown[0]")
+}
+
+// TestNew_RejectsArtifactPathsDifferingOnlyInCase is the S4 check. On APFS and
+// NTFS two paths differing only in case are one file: New accepts them, the
+// second artifact clobbers the first, and CheckArtifacts then reports permanent
+// staleness immediately after a successful Write -- a red gate that no correct
+// regeneration can clear. A Config is portable content by design, so the rule
+// is deliberately applied on case-sensitive filesystems too.
+func TestNew_RejectsArtifactPathsDifferingOnlyInCase(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, JSONPath: "docs/cli.MD"})
+
+	assert.Contains(t, msg, "Config.JSONPath")
+	assert.Contains(t, msg, "Config.MarkdownPath")
+	assert.Contains(t, msg, `"docs/cli.MD"`, "the message keeps both original spellings")
+	assert.Contains(t, msg, `"docs/CLI.md"`)
+}
+
+// TestNew_RejectsARegenerateCommandThatCorruptsTheGeneratedNotice is the S5
+// check. The value is concatenated raw into the artifact's leading HTML comment
+// and into a markdown code span, so "-->" closes the comment early and leaves
+// the remainder as rendered body, a newline injects a heading, and a backtick
+// breaks the span.
+func TestNew_RejectsARegenerateCommandThatCorruptsTheGeneratedNotice(t *testing.T) {
+	for name, value := range map[string]string{
+		"closes the generated notice early": "make docs --> # ",
+		"injects a line of its own":         "make docs\n# owned",
+		"breaks the markdown code span":     "make docs `x`",
+	} {
+		t.Run(name, func(t *testing.T) {
+			msg := newTestDocsError(t, Config{RegenerateCommand: value})
+
+			assert.Contains(t, msg, "Config.RegenerateCommand")
+		})
+	}
 }

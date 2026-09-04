@@ -26,10 +26,10 @@ const (
 )
 
 // regionNamePattern is the charset a region name must match. Region names are
-// interpolated into the HTML comment markers that delimit a generated block and
-// into the regular expression that finds them, so anything outside this charset
-// could either terminate the comment early or change what the expression means.
-// The pattern is a compile-time constant: no configuration reaches it.
+// interpolated into the HTML comment markers that delimit a generated block, so
+// anything outside this charset could terminate the comment early and leave the
+// rest of the marker as rendered body. The pattern is a compile-time constant:
+// no configuration reaches it.
 var regionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // Config is the settable behaviour of a Docs. Construct it as a keyed literal
@@ -41,12 +41,17 @@ var regionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // because these strings are both filesystem paths and content: they appear
 // inside the generated artifacts, which are committed and compared byte for
 // byte. A path may not be empty, may not be absolute, may not contain a ".."
-// element and may not contain a backslash. That holds for every entry of
-// LintedMarkdown and LintedGoDirs as well as for the scalar fields, and the
-// entry at fault is named by its index. Two of JSONPath, MarkdownPath,
-// READMEPath and AllowlistPath may not name the same file, since one artifact
-// would then overwrite another; the comparison ignores "./" and other spelling
-// differences, while the value stored is the one you wrote.
+// element, may not contain a backslash, and may not contain "<" or ">" -- an
+// angle bracket would let a path forge or close the HTML comment markers it is
+// rendered next to. That holds for every entry of LintedMarkdown and
+// LintedGoDirs as well as for the scalar fields, and the entry at fault is
+// named by its index. Two of JSONPath, MarkdownPath, READMEPath and
+// AllowlistPath may not name the same file, since one artifact would then
+// overwrite another; the comparison ignores "./", other spelling differences
+// and letter case -- the last because on a case-insensitive filesystem two such
+// paths are one file -- while the scalar value stored is the one you wrote.
+// The two slice fields are the exception to that last clause: their entries are
+// stored cleaned, so that a spelling that only looks distinct is linted once.
 type Config struct {
 	// RegenerateCommand is the command a developer should run to bring the
 	// generated artifacts back in sync -- for example "make cli-docs". It is
@@ -80,13 +85,18 @@ type Config struct {
 
 	// LintedMarkdown is the set of markdown files whose prose is checked
 	// against the surface. A nil slice defaults to just READMEPath; an
-	// explicitly empty slice opts out of markdown linting entirely.
+	// explicitly empty slice opts out of markdown linting entirely. Config
+	// reports each entry cleaned, so "./docs/guide.md" reads back as
+	// "docs/guide.md".
 	LintedMarkdown []string
 
 	// LintedGoDirs is the set of directories whose Go comments are checked
 	// against the surface. A nil slice defaults to
 	// []string{"cmd", "internal", "pkg"}; an explicitly empty slice opts out of
-	// Go comment linting entirely. Both lint scopes may not be empty at once.
+	// Go comment linting entirely. Config reports each entry cleaned, so
+	// "./pkg" reads back as "pkg". Opting both lint scopes out is allowed and
+	// does not mean nothing is linted: the markdown walk covers DocsWalkRoot
+	// either way, and LintScope reports what a run actually reached.
 	LintedGoDirs []string
 
 	// SubcommandsRegion names the generated subcommand table's region in
@@ -151,8 +161,33 @@ func (cfg Config) withDefaults() Config {
 	if cfg.LintedGoDirs == nil {
 		cfg.LintedGoDirs = []string{"cmd", "internal", "pkg"}
 	}
+	cfg.LintedMarkdown = cleanPathEntries(cfg.LintedMarkdown)
+	cfg.LintedGoDirs = cleanPathEntries(cfg.LintedGoDirs)
 
 	return cfg.clone()
+}
+
+// cleanPathEntries returns a new slice holding path.Clean of every non-empty
+// entry, so that two spellings of one path -- "./docs/guide.md" and
+// "docs/guide.md", "pkg" and "pkg/" -- become the one entry they name and the
+// deduplication further down the pipeline can see them as equal. Without it the
+// same file is linted twice: every issue in it is reported twice and the
+// coverage sentence counts it twice.
+//
+// An empty entry is deliberately left as it is rather than cleaned, because
+// path.Clean("") is ".", which would turn an obvious mistake into a silent walk
+// of the entire repository. validate rejects it a moment later and names the
+// index at fault.
+func cleanPathEntries(values []string) []string {
+	cleaned := make([]string, len(values))
+	for i, value := range values {
+		if value == "" {
+			continue
+		}
+		cleaned[i] = path.Clean(value)
+	}
+
+	return cleaned
 }
 
 // clone returns cfg with its slice fields copied, so that neither the caller's
@@ -181,7 +216,6 @@ func (cfg Config) validate() error {
 		validateRegion("SubcommandsRegion", cfg.SubcommandsRegion),
 		validateRegion("AliasesRegion", cfg.AliasesRegion),
 		validateDistinctRegions(cfg.SubcommandsRegion, cfg.AliasesRegion),
-		validateLintScope(cfg.LintedMarkdown, cfg.LintedGoDirs),
 	}
 	errs = append(errs, validatePathSlice("LintedMarkdown", cfg.LintedMarkdown)...)
 	errs = append(errs, validatePathSlice("LintedGoDirs", cfg.LintedGoDirs)...)
@@ -190,12 +224,23 @@ func (cfg Config) validate() error {
 	return errors.Join(errs...)
 }
 
-// validateRegenerateCommand rejects a missing command. The value is checked
+// validateRegenerateCommand rejects a missing command, and one carrying a
+// character that would not survive being rendered. The value is concatenated
+// raw into the HTML comment heading every generated artifact and into a
+// markdown code span, so "-->" closes that comment early and leaves the rest of
+// it as body text, a newline injects a line of the caller's choosing into the
+// artifact, and a backtick breaks the code span. The rule is narrow on purpose:
+// no plausible command line contains any of the three. The value is checked
 // trimmed but stored as given, so a consumer's spacing survives into the
 // messages that quote it.
 func validateRegenerateCommand(command string) error {
-	if strings.TrimSpace(command) == "" {
-		return fmt.Errorf("clisurface: Config.RegenerateCommand is required")
+	switch {
+	case strings.TrimSpace(command) == "":
+		return errors.New("clisurface: Config.RegenerateCommand is required")
+	case strings.ContainsAny(command, "\n\r`"):
+		return fmt.Errorf("clisurface: Config.RegenerateCommand must be a single line and must not contain a backtick, got %q", command)
+	case strings.Contains(command, "-->"):
+		return fmt.Errorf("clisurface: Config.RegenerateCommand must not contain %q, got %q", "-->", command)
 	}
 
 	return nil
@@ -203,13 +248,23 @@ func validateRegenerateCommand(command string) error {
 
 // validatePath rejects a path this package must not write to or read from: an
 // empty one would target the repository root, and an absolute one or one
-// containing ".." would leave the repository the caller pointed us at. A
-// backslash is rejected outright, because filepath.ToSlash is the identity on
-// every non-Windows platform -- so without that case both halves of the
+// containing ".." names a location outside the repository the caller pointed us
+// at. A backslash is rejected outright, because filepath.ToSlash is the identity
+// on every non-Windows platform -- so without that case both halves of the
 // absolute-path test below are the POSIX one, and a Windows-shaped path
 // ("C:\out", "\\host\share", "\etc\passwd") passes as an ordinary
-// relative name. The check is on the path's shape rather than on where it
-// resolves to, since the repository root is not known at construction time.
+// relative name. An angle bracket is rejected because a path is artifact content
+// too: MarkdownPath is interpolated raw into a region body that gets spliced
+// into READMEPath, so a path spelling out an end marker corrupts the README on
+// the first Write and then wedges every later Write and every drift check on a
+// duplicate marker, with hand repair the only way out.
+//
+// The check is on the path's shape, not on where it resolves to, since the
+// repository root is not known at construction time. Shape is therefore all
+// this can be, and it is not containment: a path that satisfies every rule here
+// still lands outside the repository if a symlink along the way points out of
+// it. Write refuses to follow one for exactly that reason, and the reads this
+// package does are confined to regular files for the same one.
 func validatePath(field, value string) error {
 	slashed := filepath.ToSlash(value)
 
@@ -222,6 +277,8 @@ func validatePath(field, value string) error {
 		return fmt.Errorf("clisurface: Config.%s must be repository-relative, got %q", field, value)
 	case slices.Contains(strings.Split(slashed, "/"), ".."):
 		return fmt.Errorf("clisurface: Config.%s must not contain a %q element, got %q", field, "..", value)
+	case strings.ContainsAny(value, "<>"):
+		return fmt.Errorf("clisurface: Config.%s must not contain %q or %q, got %q", field, "<", ">", value)
 	}
 
 	return nil
@@ -242,7 +299,7 @@ func validatePathSlice(field string, values []string) []error {
 }
 
 // validateRegion rejects a region name that would not survive being
-// interpolated into a marker comment and into the expression that finds it.
+// interpolated into the marker comments that delimit its generated block.
 func validateRegion(field, value string) error {
 	if !regionNamePattern.MatchString(value) {
 		return fmt.Errorf("clisurface: Config.%s must match %s, got %q", field, regionNamePattern, value)
@@ -278,11 +335,20 @@ type pathField struct {
 // though generation does not write it, precisely because it is hand-authored
 // input: a generated artifact landing on it destroys it the same way.
 //
-// The comparison is on path.Clean of each value, so that "docs/CLI.md" and
-// "./docs/CLI.md" are recognised as the one file they are. Only the comparison
-// normalises: the values stay exactly as the caller wrote them -- because they
-// are artifact content as well as paths -- and the message quotes both
-// spellings, so a collision reached only through cleaning is still legible.
+// The comparison is on path.Clean of each value lowercased, so that
+// "docs/CLI.md", "./docs/CLI.md" and "docs/cli.md" are recognised as the one
+// file they are. Case is folded because on APFS and NTFS two paths differing
+// only in case name one file, and the failure that follows is unrecoverable
+// from inside the tool: the second artifact clobbers the first, and
+// CheckArtifacts then reports permanent staleness immediately after a
+// successful Write -- a red gate no correct regeneration can clear. Folding it
+// on a case-sensitive filesystem too is deliberate, since a Config is portable
+// content by design and the collision must be caught wherever it is authored.
+//
+// Only the comparison normalises: the values stay exactly as the caller wrote
+// them -- because they are artifact content as well as paths -- and the message
+// quotes both spellings, so a collision reached only through normalisation is
+// still legible.
 func validateDistinctPaths(cfg Config) []error {
 	fields := []pathField{
 		{"JSONPath", cfg.JSONPath},
@@ -294,7 +360,7 @@ func validateDistinctPaths(cfg Config) []error {
 	var errs []error
 	firstByPath := make(map[string]pathField, len(fields))
 	for _, field := range fields {
-		cleaned := path.Clean(field.value)
+		cleaned := strings.ToLower(path.Clean(field.value))
 		if first, taken := firstByPath[cleaned]; taken {
 			errs = append(errs, fmt.Errorf("clisurface: Config.%s (%q) and Config.%s (%q) must name different files",
 				first.name, first.value, field.name, field.value))
@@ -304,15 +370,4 @@ func validateDistinctPaths(cfg Config) []error {
 	}
 
 	return errs
-}
-
-// validateLintScope rejects a configuration that would lint nothing. Opting one
-// half out is supported; opting both out would make every lint pass vacuously,
-// which reads as a passing check rather than as a disabled one.
-func validateLintScope(markdown, goDirs []string) error {
-	if len(markdown) > 0 || len(goDirs) > 0 {
-		return nil
-	}
-
-	return fmt.Errorf("clisurface: Config.LintedMarkdown and Config.LintedGoDirs are both empty, so this configuration would lint nothing")
 }
