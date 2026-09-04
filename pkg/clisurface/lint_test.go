@@ -335,6 +335,24 @@ func TestIssueInAGeneratedFilePointsAtRegeneration(t *testing.T) {
 	}
 }
 
+// TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath is the defect that
+// cleaning the scalar path fields fixes. The file on an issue comes from the
+// documentation walk and so is cleaned, while the path it is compared against
+// came from the Config -- so a caller who wrote "./docs/CLI.md" made the two
+// unequal for the same file, and every lint hit inside the generated reference
+// was advertised as prose to hand-edit or allowlist, which is precisely what the
+// message it should have printed tells the reader not to do.
+func TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath(t *testing.T) {
+	d := newTestDocs(t, func(cfg *Config) { cfg.MarkdownPath = "./docs/CLI.md" })
+
+	issue := d.stamp(Issue{File: "docs/CLI.md", Line: 12, Token: "--gone", Reason: "is not a flag of any command in the CLI"})
+
+	assert.Equal(t,
+		"docs/CLI.md:12: --gone is not a flag of any command in the CLI. docs/CLI.md is generated: regenerate it with 'make cli-docs' rather than editing it",
+		issue.String(),
+		"the spelling of MarkdownPath must not decide whether a generated file is recognised as one")
+}
+
 func TestLintReportNumbersEveryIssue(t *testing.T) {
 	report := LintReport([]Issue{
 		{File: "README.md", Line: 7, Token: "--gone", Reason: "is not a flag of any command in the CLI"},

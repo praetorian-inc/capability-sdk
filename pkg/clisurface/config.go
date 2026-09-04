@@ -49,9 +49,16 @@ var regionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // AllowlistPath may not name the same file, since one artifact would then
 // overwrite another; the comparison ignores "./", other spelling differences
 // and letter case -- the last because on a case-insensitive filesystem two such
-// paths are one file -- while the scalar value stored is the one you wrote.
-// The two slice fields are the exception to that last clause: their entries are
-// stored cleaned, so that a spelling that only looks distinct is linted once.
+// paths are one file.
+//
+// Every path field is stored cleaned, scalar and slice alike: "./docs/CLI.md"
+// and "docs//CLI.md" are both kept as "docs/CLI.md". Two things depend on it.
+// A spelling that only looks distinct must be linted once rather than twice.
+// And a path field is compared against paths the documentation walk produced,
+// which are already cleaned -- so an uncleaned field silently fails to match
+// itself, and a lint issue inside a generated artifact stops being recognised
+// as one. Cleaning runs after validation, so a rejected path is still quoted
+// back in the spelling you wrote.
 type Config struct {
 	// RegenerateCommand is the command a developer should run to bring the
 	// generated artifacts back in sync -- for example "make cli-docs". It is
@@ -121,7 +128,49 @@ func New(cfg Config) (*Docs, error) {
 		return nil, err
 	}
 
-	return &Docs{cfg: resolved}, nil
+	return &Docs{cfg: resolved.cleanScalarPaths()}, nil
+}
+
+// cleanScalarPaths returns cfg with every scalar path field cleaned, the slice
+// fields having been cleaned by withDefaults already.
+//
+// It runs after validate, not before, and both halves of that matter. Cleaning
+// first would collapse a ".." element -- "docs/../../etc" becomes "../etc",
+// "docs/../etc" becomes "etc" -- so a path validate exists to reject would
+// either change meaning or pass, and error messages would quote a spelling the
+// caller never wrote. Running after means cleaning can only drop a "./", a
+// doubled slash or a trailing one: it cannot introduce a "..", an absolute path,
+// a backslash or an empty string, so nothing validate ruled out can arrive
+// through it.
+//
+// Without this the paths a Docs holds are compared against paths that came from
+// a filesystem walk, which are cleaned. Issue.whollyGenerated is the case that
+// bit: with MarkdownPath left as "./docs/CLI.md" it never equalled the
+// "docs/CLI.md" the walk produced, so a lint hit inside the generated reference
+// was reported as prose to hand-edit or allowlist -- exactly what the message it
+// should have printed tells the reader not to do.
+func (cfg Config) cleanScalarPaths() Config {
+	cfg.DocsWalkRoot = cleanScalarPath(cfg.DocsWalkRoot)
+	cfg.JSONPath = cleanScalarPath(cfg.JSONPath)
+	cfg.MarkdownPath = cleanScalarPath(cfg.MarkdownPath)
+	cfg.READMEPath = cleanScalarPath(cfg.READMEPath)
+	cfg.AllowlistPath = cleanScalarPath(cfg.AllowlistPath)
+
+	return cfg
+}
+
+// cleanScalarPath is path.Clean with the one exception cleanPathEntries makes,
+// and for the same reason: path.Clean("") is ".", so an empty field would turn
+// into a path naming the repository root. Nothing reaches it empty today --
+// withDefaults fills every scalar path field and validate has already rejected
+// an empty one -- but the guard is a single comparison and the failure it
+// forecloses is silent, which is the worse of the two.
+func cleanScalarPath(value string) string {
+	if value == "" {
+		return ""
+	}
+
+	return path.Clean(value)
 }
 
 // Config reports the configuration this Docs was built with, every zero value
@@ -345,10 +394,10 @@ type pathField struct {
 // on a case-sensitive filesystem too is deliberate, since a Config is portable
 // content by design and the collision must be caught wherever it is authored.
 //
-// Only the comparison normalises: the values stay exactly as the caller wrote
-// them -- because they are artifact content as well as paths -- and the message
-// quotes both spellings, so a collision reached only through normalisation is
-// still legible.
+// Case folding is the comparison's alone; New stores each path field cleaned but
+// never lowercased. And this runs before that cleaning, so the message quotes
+// both values exactly as the caller wrote them and a collision reached only
+// through normalisation is still legible.
 func validateDistinctPaths(cfg Config) []error {
 	fields := []pathField{
 		{"JSONPath", cfg.JSONPath},

@@ -330,14 +330,67 @@ func TestNew_RejectsACollisionHiddenByAnUncleanedPath(t *testing.T) {
 	assert.Contains(t, msg, "Config.MarkdownPath")
 }
 
-// TestNew_StoresAnExplicitPathVerbatim locks the other half of that decision:
-// cleaning happens inside the comparison only. A path field is artifact content
-// as well as a filesystem path, so the caller's spelling survives into the
-// committed bytes.
-func TestNew_StoresAnExplicitPathVerbatim(t *testing.T) {
-	d := newTestDocs(t, func(cfg *Config) { cfg.JSONPath = "./docs/surface.json" })
+// TestNew_CleansScalarPathFields replaces a test that pinned the opposite --
+// verbatim storage, on the reasoning that a path field is artifact content and
+// the caller's spelling should reach the committed bytes. That reasoning left
+// out the comparisons. A stored path field is matched against paths the
+// documentation walk produced, and those are cleaned, so an uncleaned field
+// silently fails to match itself; see
+// TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath for what that
+// cost. Cleaning is the narrowest normalisation that makes the comparisons
+// hold, and every spelling it changes names the same file.
+func TestNew_CleansScalarPathFields(t *testing.T) {
+	tests := map[string]struct{ given, want string }{
+		"a leading dot slash":   {"./docs/CLI.md", "docs/CLI.md"},
+		"a doubled slash":       {"docs//CLI.md", "docs/CLI.md"},
+		"a trailing slash":      {"docs/reference/", "docs/reference"},
+		"an interior dot":       {"docs/./CLI.md", "docs/CLI.md"},
+		"an already clean path": {"docs/CLI.md", "docs/CLI.md"},
+	}
 
-	assert.Equal(t, "./docs/surface.json", d.Config().JSONPath)
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			d := newTestDocs(t, func(cfg *Config) { cfg.MarkdownPath = test.given })
+
+			assert.Equal(t, test.want, d.Config().MarkdownPath)
+		})
+	}
+}
+
+// TestNew_CleansTheWalkRootAndThePathsDerivedFromIt covers the field the other
+// four are joined onto: an uncleaned DocsWalkRoot would reach the documentation
+// walk as given while the paths derived from it arrived cleaned by path.Join.
+func TestNew_CleansTheWalkRootAndThePathsDerivedFromIt(t *testing.T) {
+	cfg := newTestDocs(t, func(cfg *Config) { cfg.DocsWalkRoot = "./reference/" }).Config()
+
+	assert.Equal(t, "reference", cfg.DocsWalkRoot)
+	assert.Equal(t, "reference/cli-surface.json", cfg.JSONPath)
+	assert.Equal(t, "reference/CLI.md", cfg.MarkdownPath)
+	assert.Equal(t, "reference/cli-surface-allow.txt", cfg.AllowlistPath)
+}
+
+// TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway is why cleaning
+// runs after validate rather than before. path.Clean resolves ".." against the
+// element in front of it, so cleaning first would turn "docs/../outside.json"
+// into the perfectly valid "outside.json" and quietly widen where a Docs writes.
+func TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway(t *testing.T) {
+	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, JSONPath: "docs/../outside.json"})
+
+	assert.Contains(t, msg, "Config.JSONPath")
+	assert.Contains(t, msg, "..")
+	assert.Contains(t, msg, "docs/../outside.json", "and the message quotes the spelling the caller wrote")
+}
+
+// TestCleanScalarPathLeavesAnEmptyPathEmpty guards the trap cleanPathEntries
+// already documents: path.Clean("") is ".", so cleaning an empty path field
+// would replace a missing path with one naming the walk's own root. No
+// configuration can reach it -- withDefaults fills every scalar path field and
+// validate rejects an empty one before cleaning runs -- so the guard is
+// exercised directly, which is also what keeps it from being dropped as dead
+// code by whoever adds the next path field.
+func TestCleanScalarPathLeavesAnEmptyPathEmpty(t *testing.T) {
+	assert.Equal(t, "", cleanScalarPath(""), "path.Clean would answer \".\"")
+	assert.Equal(t, "docs", cleanScalarPath("./docs/"))
 }
 
 // TestNew_RejectsABackslashPathField closes a gap that only shows on POSIX:
