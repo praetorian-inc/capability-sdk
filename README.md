@@ -138,6 +138,15 @@ go func() { agg.Submit(ctx, finding2) }()
 agg.Close() // Wait for all writes
 ```
 
+### `pkg/clisurface` - CLI Documentation Drift Gate
+
+Walks a cobra command tree and generates, splices and checks the documentation
+artifacts built from it, so committed docs cannot silently drift from the
+binary. Build a `Docs` with `clisurface.New`, then use `Docs.Write` to
+regenerate and `Docs.CheckArtifacts` plus `Docs.LintRepo` to fail CI when the
+committed files, prose or Go comments no longer match the CLI. See
+`go doc ./pkg/clisurface` for the full API.
+
 ## Architecture
 
 ```
