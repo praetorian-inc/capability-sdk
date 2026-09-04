@@ -459,6 +459,70 @@ func TestLintRepoLintsAGoFileUnderTwoConfiguredDirectoriesOnce(t *testing.T) {
 	assert.Equal(t, "--gone-from-comments", issues[0].Token)
 }
 
+// TestLintRepoOrdersIssuesWithinOneFileByLineThenToken locks the two
+// tiebreakers of LintRepo's comparator. Ordering is not cosmetic here: the
+// issues are what a failing gate prints, and a CI log whose lines move around
+// between runs cannot be diffed against the previous failure.
+//
+// The Token tiebreaker is proved rather than merely asserted. LintMarkdown
+// emits the flags of one invocation in argv order, so the same content read
+// straight out of it hands back --zulu before --alpha; LintRepo must hand back
+// the reverse, which it can only do by comparing the tokens.
+func TestLintRepoOrdersIssuesWithinOneFileByLineThenToken(t *testing.T) {
+	const doc = "```bash\ntool scan --zulu --alpha\n```\n\nSee also `--mid`.\n"
+
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	s := Walk(newTestTree())
+	require.NoError(t, d.Write(root, s))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "guide.md"), []byte(doc), 0o644))
+
+	unsorted := d.LintMarkdown(s, "docs/guide.md", doc, emptyAllowlist(t))
+	require.Len(t, unsorted, 3)
+	require.Equal(t, "--zulu", unsorted[0].Token, "the raw emission order is argv order, not sorted order")
+	require.Equal(t, "--alpha", unsorted[1].Token)
+
+	issues, _, err := d.LintRepo(root, s, emptyAllowlist(t))
+	require.NoError(t, err)
+
+	require.Len(t, issues, 3)
+	type place struct {
+		Line  int
+		Token string
+	}
+	got := make([]place, 0, len(issues))
+	for _, issue := range issues {
+		require.Equal(t, "docs/guide.md", issue.File, "every issue here is in the one document")
+		got = append(got, place{Line: issue.Line, Token: issue.Token})
+	}
+	assert.Equal(t, []place{
+		{Line: 2, Token: "--alpha"},
+		{Line: 2, Token: "--zulu"},
+		{Line: 5, Token: "--mid"},
+	}, got, "same file sorts by line, and a shared line sorts by token")
+}
+
+// TestLintRepoReturnsAGoParseErrorRatherThanSwallowingIt pins the failure mode
+// of a tree the parser cannot read. A gate that treated an unparseable file as
+// "no issues found" would report a clean repository for the one file most
+// likely to be mid-edit, so the error has to come back out of LintRepo.
+func TestLintRepoReturnsAGoParseErrorRatherThanSwallowingIt(t *testing.T) {
+	d := newTestDocs(t)
+	root := newFakeRepo(t, d)
+	s := Walk(newTestTree())
+	require.NoError(t, d.Write(root, s))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "cmd", "tool"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "cmd", "tool", "main.go"),
+		[]byte("package main\n\nfunc main() {\n"), 0o644))
+
+	issues, scope, err := d.LintRepo(root, s, emptyAllowlist(t))
+	require.Error(t, err, "an unparseable Go file must not read as a clean tree")
+	assert.ErrorContains(t, err, "parsing cmd/tool/main.go", "the error names the file that could not be read")
+	assert.Nil(t, issues)
+	assert.Equal(t, LintScope{}, scope, "a run that failed reports no coverage")
+}
+
 func TestLoadAllowlist(t *testing.T) {
 	d := newTestDocs(t)
 	root := t.TempDir()
