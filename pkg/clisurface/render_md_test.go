@@ -166,6 +166,75 @@ func TestRenderRegionsAliasTableOmitsCommandsWithoutAliases(t *testing.T) {
 	assert.Contains(t, body, "[docs/CLI.md](docs/CLI.md)", "the region links to the full reference")
 }
 
+// TestRenderRegionsAliasTableIsByteExactWhenAliasesExist pins the whole
+// non-empty body, not just the row. Collecting the rows before writing moved
+// the lead-in, the header and the blank line before the closing sentence
+// behind a condition, and this package's committed artifacts are compared
+// byte-for-byte, so a stray blank line is a regression, not cosmetics.
+func TestRenderRegionsAliasTableIsByteExactWhenAliasesExist(t *testing.T) {
+	d := newTestDocs(t)
+	s := Walk(newTestTree())
+
+	body := d.renderRegions(s)[1].Body
+
+	assert.Equal(t, strings.Join([]string{
+		"Some subcommands carry aliases for discoverability:",
+		"",
+		"| Subcommand | Aliases |",
+		"| --- | --- |",
+		"| `scan` | `sc`, `scanner` |",
+		"",
+		"The full reference — every subcommand, alias and flag, including the ones " +
+			"hidden from `--help` — is generated into [docs/CLI.md](docs/CLI.md).",
+		"",
+	}, "\n"), body)
+}
+
+// TestRenderRegionsAliasTableDropsItsLeadInWhenNothingHasAliases is the case
+// the unconditional lead-in got wrong: a CLI whose subcommands declare no
+// aliases used to be handed "Some subcommands carry aliases for
+// discoverability:" above an empty two-line table -- a claim contradicted by
+// the very table meant to support it. The lead-in and the table now go
+// together, and the pointer to the full reference stays because it is true of
+// every CLI and keeps the region non-empty prose.
+func TestRenderRegionsAliasTableDropsItsLeadInWhenNothingHasAliases(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{
+		{Path: "tool", Use: "tool"},
+		{Path: "tool scan", Use: "scan", Short: "scan things"},
+		{Path: "tool plain", Use: "plain", Short: "no aliases anywhere"},
+	}}
+
+	body := d.renderRegions(s)[1].Body
+
+	assert.Equal(t,
+		"The full reference — every subcommand, alias and flag, including the ones "+
+			"hidden from `--help` — is generated into [docs/CLI.md](docs/CLI.md).\n",
+		body, "with no rows to show, the region is the pointer sentence and nothing else")
+	assert.NotContains(t, body, "aliases for discoverability",
+		"no lead-in may promise aliases the table cannot show")
+	assert.NotContains(t, body, "| Subcommand | Aliases |", "and no header for a table with no rows")
+	assert.NotEmpty(t, body, "the region still has to hold something for the splice to read as prose")
+}
+
+// TestRenderRegionsAliasTableHidesTheTableWhenOnlyHiddenCommandsHaveAliases
+// covers the boundary between the visibility filter and the emptiness test:
+// the alias-bearing command exists but is filtered out, so the row count -- not
+// the alias count -- has to be what decides.
+func TestRenderRegionsAliasTableHidesTheTableWhenOnlyHiddenCommandsHaveAliases(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{
+		{Path: "tool", Use: "tool"},
+		{Path: "tool secret", Use: "secret", Short: "hidden", Hidden: true, Aliases: []string{"s"}},
+	}}
+
+	body := d.renderRegions(s)[1].Body
+
+	assert.NotContains(t, body, "aliases for discoverability")
+	assert.NotContains(t, body, "`s`", "a hidden command's aliases stay out of the README")
+	assert.Contains(t, body, "[docs/CLI.md](docs/CLI.md)")
+}
+
 func TestRenderRegionsAliasTableFollowsAliasTransitions(t *testing.T) {
 	d := newTestDocs(t)
 	base := Surface{Commands: []Command{

@@ -151,24 +151,37 @@ func renderSubcommandRegion(s Surface) string {
 // README, and rows reading "none" contradict the lead-in and add noise. The
 // generated reference at Config.MarkdownPath remains the complete reference and
 // does list them.
+//
+// The rows are collected before anything is written, because a CLI whose
+// subcommands declare no aliases at all must not be handed a lead-in promising
+// aliases over an empty table. In that case the table and its lead-in are
+// omitted entirely and the region holds only the pointer to the full
+// reference -- which is true of every CLI, keeps the region non-empty so the
+// surrounding splice still reads as prose, and says the one useful thing left
+// to say.
 func (d *Docs) renderAliasRegion(s Surface) string {
 	root := s.Root()
 
-	var b strings.Builder
-	writeLines(&b,
-		"Some subcommands carry aliases for discoverability:",
-		"",
-		"| Subcommand | Aliases |",
-		"| --- | --- |",
-	)
+	rows := make([]string, 0, len(s.Children(root)))
 	for _, c := range visible(s.Children(root)) {
 		if len(c.Aliases) == 0 {
 			continue
 		}
-		writeLines(&b, "| "+code(name(c.Path))+" | "+aliasCell(c)+" |")
+		rows = append(rows, "| "+code(name(c.Path))+" | "+aliasCell(c)+" |")
+	}
+
+	var b strings.Builder
+	if len(rows) > 0 {
+		writeLines(&b,
+			"Some subcommands carry aliases for discoverability:",
+			"",
+			"| Subcommand | Aliases |",
+			"| --- | --- |",
+		)
+		writeLines(&b, rows...)
+		writeLines(&b, "")
 	}
 	writeLines(&b,
-		"",
 		"The full reference — every subcommand, alias and flag, including the ones "+
 			"hidden from `--help` — is generated into ["+d.cfg.MarkdownPath+"]("+d.cfg.MarkdownPath+").",
 	)
