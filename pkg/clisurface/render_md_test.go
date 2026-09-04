@@ -604,3 +604,31 @@ func TestRenderMarkdownWidensTheUsageSpanAroundABacktickInUse(t *testing.T) {
 	assert.NotContains(t, scan, "- Usage: `tool scan `",
 		"a single-tick wrap would close at the value's backtick and push <domain> into live markdown")
 }
+
+func TestFenceWidensToContainALeadingBacktickRun(t *testing.T) {
+	assert.Equal(t, "```", fence(""))
+	assert.Equal(t, "```", fence("plain"))
+	assert.Equal(t, "```", fence("a`b mid-line"),
+		"a closing fence must begin its line, so an inline run leaves the standard three")
+	assert.Equal(t, "````", fence("```\nrest"))
+	assert.Equal(t, "````", fence("  ```\nrest"),
+		"leading whitespace is trimmed before measuring, matching CommonMark's indent-tolerant close")
+	assert.Equal(t, "`````", fence("````"))
+	assert.Equal(t, "````", fence("foo\n```\nbar"))
+}
+
+func TestRenderMarkdownWidensTheExamplesFenceAroundATripleBacktickLine(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{{
+		Path: "tool", Use: "tool", Runnable: true, Short: "the tool",
+		Example: "tool run\n```\necho injected\n```",
+	}}}
+
+	md := string(d.renderMarkdown(s))
+	section := section(t, md, "tool")
+
+	assert.Contains(t, section, "\n````bash\ntool run\n```\necho injected\n```\n````\n",
+		"the delimiter widens so the example's own ``` line cannot close the block")
+	assert.NotContains(t, section, "\n```bash\n",
+		"a fixed three-tick fence would close on the first line of the example")
+}

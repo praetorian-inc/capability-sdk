@@ -818,6 +818,31 @@ func TestLintMarkdownStillCatchesATypoUnderARunnableRoot(t *testing.T) {
 	assert.Equal(t, "group", issues[0].Suggestion)
 }
 
+func TestLintMarkdownReportsATypoUnderCobrasCommandPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{
+		{Path: "tool", Use: "tool", Short: "the tool", Runnable: true},
+		{Path: "tool config", Use: "config [command]", Short: "configure", Runnable: true},
+		{Path: "tool config show", Use: "show", Short: "print it", Runnable: true},
+	}}
+
+	cfg, ok := s.Command("tool config")
+	require.True(t, ok)
+	require.True(t, cfg.Runnable)
+	require.False(t, hasArgSketch(cfg.Use), "cobra's [command] placeholder is not an argument sketch")
+	require.NotEmpty(t, s.Children(cfg.Path))
+
+	issues := d.LintMarkdown(s, "README.md", "```bash\ntool config shwo\n```", emptyAllowlist(t))
+
+	require.Len(t, issues, 1, "findings: %v", tokensOf(issues))
+	assert.Equal(t, "shwo", issues[0].Token)
+	assert.Equal(t, "tool config", issues[0].Command)
+	assert.Equal(t, "show", issues[0].Suggestion)
+	assert.True(t, issues[0].Subcommand)
+}
+
 // TestHasArgSketchRecognizesBothArgumentConventions covers the shapes cobra Use
 // strings actually take. Neither convention is dominant in this codebase --
 // titus writes "[owner/repo]" and umber writes "<name>" -- and the two tokens
@@ -840,9 +865,16 @@ func TestHasArgSketchRecognizesBothArgumentConventions(t *testing.T) {
 		{use: "   ", want: false},
 		{use: "scan", want: false},
 		{use: "scan [flags]", want: false},
+		{use: "config [command]", want: false},
+		{use: "config [COMMAND]", want: false},
+		{use: "help [command]", want: false},
+		{use: "group <command>", want: false},
+		{use: "group [subcommand]", want: false},
+		{use: "group <subcommand>", want: false},
 		{use: "scan -j", want: false},
 		{use: "scan --json", want: false},
 		{use: "scan [flags] --json", want: false},
+		{use: "config [command] <file>", want: true},
 	} {
 		t.Run(strconv.Quote(tc.use), func(t *testing.T) {
 			t.Parallel()
