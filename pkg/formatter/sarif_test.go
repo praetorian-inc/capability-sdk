@@ -90,14 +90,14 @@ func TestSARIFFormatter_SeverityMapping(t *testing.T) {
 			bf.Reset()
 		}
 
-		f.Format(context.Background(), formatter.Finding{
+		require.NoError(t, f.Format(context.Background(), formatter.Finding{
 			RuleID:   "test",
 			Severity: tc.sev,
-		})
-		f.Complete(context.Background(), formatter.Summary{})
+		}))
+		require.NoError(t, f.Complete(context.Background(), formatter.Summary{}))
 
 		var sarif map[string]any
-		json.Unmarshal(buf.Bytes(), &sarif)
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &sarif))
 
 		runs := sarif["runs"].([]any)
 		run := runs[0].(map[string]any)
@@ -118,17 +118,17 @@ func TestSARIFFormatter_RuleDeduplication(t *testing.T) {
 
 	// Add multiple findings with same rule
 	for i := 0; i < 3; i++ {
-		f.Format(context.Background(), formatter.Finding{
+		require.NoError(t, f.Format(context.Background(), formatter.Finding{
 			RuleID:   "same-rule",
 			Title:    "Same Rule",
 			Severity: formatter.SeverityHigh,
-		})
+		}))
 	}
 
-	f.Complete(context.Background(), formatter.Summary{})
+	require.NoError(t, f.Complete(context.Background(), formatter.Summary{}))
 
 	var sarif map[string]any
-	json.Unmarshal(buf.Bytes(), &sarif)
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &sarif))
 
 	runs := sarif["runs"].([]any)
 	run := runs[0].(map[string]any)
@@ -151,7 +151,7 @@ func TestSARIFFormatter_PhysicalLocation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	f.Format(context.Background(), formatter.Finding{
+	require.NoError(t, f.Format(context.Background(), formatter.Finding{
 		RuleID:      "test-rule",
 		Title:       "Test Finding",
 		Description: "Test description",
@@ -161,12 +161,12 @@ func TestSARIFFormatter_PhysicalLocation(t *testing.T) {
 			StartLine: 10,
 			EndLine:   15,
 		},
-	})
+	}))
 
-	f.Complete(context.Background(), formatter.Summary{})
+	require.NoError(t, f.Complete(context.Background(), formatter.Summary{}))
 
 	var sarif map[string]any
-	json.Unmarshal(buf.Bytes(), &sarif)
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &sarif))
 
 	runs := sarif["runs"].([]any)
 	run := runs[0].(map[string]any)
@@ -195,7 +195,7 @@ func TestSARIFFormatter_LogicalLocation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	f.Format(context.Background(), formatter.Finding{
+	require.NoError(t, f.Format(context.Background(), formatter.Finding{
 		RuleID:      "test-rule",
 		Title:       "Test Finding",
 		Description: "Test description",
@@ -204,12 +204,12 @@ func TestSARIFFormatter_LogicalLocation(t *testing.T) {
 			ResourceARN:  "arn:aws:s3:::my-bucket",
 			ResourceType: "AWS::S3::Bucket",
 		},
-	})
+	}))
 
-	f.Complete(context.Background(), formatter.Summary{})
+	require.NoError(t, f.Complete(context.Background(), formatter.Summary{}))
 
 	var sarif map[string]any
-	json.Unmarshal(buf.Bytes(), &sarif)
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &sarif))
 
 	runs := sarif["runs"].([]any)
 	run := runs[0].(map[string]any)

@@ -76,7 +76,4 @@ func TestNew_TerminalFormat(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, f)
-
-	// Verify it implements Formatter
-	var _ formatter.Formatter = f
 }

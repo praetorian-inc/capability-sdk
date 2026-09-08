@@ -26,7 +26,7 @@ type Finding struct {
 	Location Location `json:"location"`
 
 	// Provenance
-	Source    string    `json:"source"`    // Scanner name
+	Source    string    `json:"source"` // Scanner name
 	Timestamp time.Time `json:"timestamp"`
 
 	// Extensibility
