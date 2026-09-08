@@ -120,10 +120,9 @@ func (d *Docs) renderRegions(s Surface) []region {
 	}
 }
 
-// renderSubcommandRegion renders the Quick Start subcommand listing: the
-// visible top-level commands with their cobra Short descriptions. It states no
-// count — the list below it is the count, and a written one would be a second
-// thing that can go stale.
+// renderSubcommandRegion renders the Quick Start subcommand listing: the visible
+// top-level commands with their cobra Short descriptions. It states no count -- the
+// list is the count, and a written one is a second thing that can go stale.
 func renderSubcommandRegion(s Surface) string {
 	root := s.Root()
 	children := visible(s.Children(root))
@@ -152,19 +151,13 @@ func renderSubcommandRegion(s Surface) string {
 	return b.String()
 }
 
-// renderAliasRegion renders the Quick Start alias table. Only subcommands that
-// actually declare aliases are listed: this is the most-read part of the
-// README, and rows reading "none" contradict the lead-in and add noise. The
-// generated reference at Config.MarkdownPath remains the complete reference and
-// does list them.
+// renderAliasRegion renders the Quick Start alias table. Only subcommands declaring
+// aliases are listed: this is the most-read part of the README, and rows reading
+// "none" contradict the lead-in. The reference at Config.MarkdownPath stays complete.
 //
-// The rows are collected before anything is written, because a CLI whose
-// subcommands declare no aliases at all must not be handed a lead-in promising
-// aliases over an empty table. In that case the table and its lead-in are
-// omitted entirely and the region holds only the pointer to the full
-// reference -- which is true of every CLI, keeps the region non-empty so the
-// surrounding splice still reads as prose, and says the one useful thing left
-// to say.
+// Rows are collected before anything is written, so a CLI with no aliases is not
+// handed a lead-in promising them over an empty table. There both are omitted and the
+// region holds only the pointer to the full reference, keeping it non-empty.
 func (d *Docs) renderAliasRegion(s Surface) string {
 	root := s.Root()
 
@@ -240,12 +233,9 @@ func name(path string) string {
 	return path
 }
 
-// titleFirst upper-cases the first rune of s, leaving the rest untouched. The
-// consumer's root command name is a lowercase binary name, and the README
-// sentence it leads reads as a proper noun -- so the upcase is content, not
-// decoration. The stdlib's whole-string title-caser is deprecated, and the
-// x/text casing package would be a new dependency for one rune, so this decodes
-// the rune itself.
+// titleFirst upper-cases the first rune of s: the root command name leads a README
+// sentence as a proper noun. The stdlib's whole-string title-caser is deprecated and
+// x/text would be a new dependency for one rune.
 func titleFirst(s string) string {
 	if s == "" {
 		return ""
@@ -301,13 +291,10 @@ func aliasCell(c *Command) string {
 	return strings.Join(out, ", ")
 }
 
-// code wraps s in markdown code ticks, widening the delimiter when s itself
-// holds a backtick. Widening is not cosmetic: a cobra Use string can carry a
-// backtick, and a plain single-tick wrap would let it close the span early --
-// putting the rest of the value, angle-bracket placeholders included, back into
-// live markdown and defeating the very containment the code span was for. A
-// value containing a backtick needs a longer delimiter plus padding, which is
-// how markdown nests code spans.
+// code wraps s in markdown code ticks, widening the delimiter when s holds a
+// backtick. Not cosmetic: a cobra Use string can carry one, and a single-tick wrap
+// lets it close the span early, putting the rest of the value back into live
+// markdown.
 func code(s string) string {
 	if !strings.Contains(s, "`") {
 		return "`" + s + "`"
@@ -319,30 +306,21 @@ func code(s string) string {
 	return fence + " " + s + " " + fence
 }
 
-// fence returns the backtick delimiter to open and close a fenced block around
-// body: the standard three, widened to one more than the longest run of
-// backticks that starts a line of body.
+// fence returns the backtick delimiter for a fenced block around body: the standard
+// three, widened to one more than the longest run of backticks that starts a line of
+// body.
 //
-// This is code's problem one level up, and it is the more damaging half. A
-// fenced block is closed by a line whose backtick run is at least as long as
-// the one that opened it, so a cobra Example -- or a Short, which the README
-// subcommand region prints inside a fence -- carrying a line of three backticks
-// ENDS the block there. Everything after it stops being example text and
-// becomes live markdown: the remainder of the value renders as headings and
-// emphasis, and any raw HTML in it is handed to the renderer, which is the same
-// "<base>" hazard escapeAngles exists to head off, except that inside a fence
-// nothing escaped it because nothing needed to. Opening with a longer delimiter
-// makes the content's own runs too short to close the block, which is how
-// markdown nests fences.
+// This is code's problem one level up and the more damaging half. A block is closed
+// by a line whose run is at least as long as the opener, so a cobra Example -- or a
+// Short, which the README subcommand region fences -- carrying a three-backtick line
+// ENDS the block there and everything after becomes live markdown, raw HTML included:
+// the "<base>" hazard escapeAngles heads off, except that inside a fence nothing
+// escaped it.
 //
-// Leading whitespace is trimmed before measuring rather than bounded at the
-// three spaces CommonMark allows before a closing fence. That over-counts an
-// indented run that could not have closed anything, which costs one backtick of
-// delimiter width in the rendered output and never a missed breakout -- the
-// right direction for a bound this cheap. Backtick runs that do not start a
-// line are ignored, because a closing fence must begin its line; an inline span
-// mid-line therefore leaves the standard three untouched, and the common case
-// renders byte-identically to a fixed fence.
+// Leading whitespace is trimmed before measuring rather than bounded at CommonMark's
+// three spaces, which over-counts an indented run that could not have closed anything
+// -- one backtick of extra width, never a missed breakout. Runs that do not start a
+// line are ignored, since a closing fence must begin its line.
 func fence(body string) string {
 	longest := 0
 	for _, l := range strings.Split(body, "\n") {
@@ -365,39 +343,29 @@ func cell(s string) string {
 // escapeAngles neutralizes the HTML angle brackets in cobra-supplied prose.
 //
 // Markdown passes raw HTML through, and cobra help strings routinely carry
-// argument placeholders spelled "<domain>". An unknown tag has no inner text, so
-// the placeholder does not merely render oddly -- it VANISHES, and the generated
-// reference then silently documents a description or a default other than the
-// one it was handed. That is the correctness bug. A placeholder that happens to
-// name a real void element, "<base>" being the motivating case, is worse still:
-// GitHub's sanitizer strips it, but a renderer that does not sanitize -- a local
-// preview, mkdocs, a published docs site -- acts on it, and <base> retargets
-// how every relative link on the page resolves.
+// placeholders spelled "<domain>". An unknown tag has no inner text, so the
+// placeholder VANISHES and the reference silently documents something else. One
+// naming a real void element -- "<base>", the motivating case -- is worse: GitHub's
+// sanitizer strips it, but a local preview or published docs site acts on it, and
+// <base> retargets every relative link on the page.
 //
-// Only "<" and ">" are escaped, deliberately not "&". Escaping "&" would turn a
-// help string that already reads "&lt;" into "&amp;lt;", and a lone "&" is
-// rendered literally by CommonMark regardless, so the extra churn buys nothing.
-// The consequence, accepted knowingly, is that a help string containing a
-// literal "&lt;" still renders as "<": this escaping is safe, not round-trip
-// faithful. The two replacements are order-independent, because neither "&lt;"
-// nor "&gt;" contains an angle bracket and so neither can feed the other.
+// Only "<" and ">" are escaped, deliberately not "&", which would turn a help string
+// already reading "&lt;" into "&amp;lt;". So a literal "&lt;" still renders as "<":
+// safe, not round-trip faithful. The two replacements are order-independent.
 //
-// Text destined for a code span or a fenced block must NOT come through here:
-// inside a span "&lt;" renders as those four literal characters. Angle brackets
-// are already inert there, which is why usage(), the Default column and the
-// Examples fence are left alone.
+// Text destined for a code span or fence must NOT come through here -- "&lt;" renders
+// literally there -- which is why usage(), the Default column and the Examples fence
+// are left alone.
 func escapeAngles(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
 }
 
-// codeCell wraps a value in code ticks safely inside a table cell. Defaults and flag
-// types come from cobra, so they can hold a pipe, a newline or a backtick -- any of
-// which breaks the row, and a broken row silently drops a flag from the reference.
-// The backtick is code's problem, so the delimiter widening lives there; what this
-// adds is the row-level handling a code span cannot express, since a pipe closes the
-// table cell even from inside one.
+// codeCell wraps a value in code ticks safely inside a table cell. Cobra defaults
+// and types can hold a pipe, newline or backtick, any of which breaks the row and
+// silently drops a flag. Widening is code's job; this adds the row-level handling a
+// code span cannot express, a pipe closing the cell even from inside one.
 func codeCell(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "|", "\\|")

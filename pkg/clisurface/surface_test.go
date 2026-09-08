@@ -1,11 +1,8 @@
 package clisurface
 
-// These tests are in package clisurface rather than clisurface_test on purpose.
-// They call unexported helpers directly (anchor, codeCell, dedent,
-// forEachCommand, nearest, pathsOf, readAll, shellSegments, tokensOf) and stamp
-// unexported fields on the values they assert against, which an external test
-// package cannot do. Testing the exported surface from outside stays the
-// default everywhere it is possible.
+// Package clisurface rather than clisurface_test on purpose: these tests call
+// unexported helpers directly and stamp unexported fields, which an external test
+// package cannot do.
 
 import (
 	"fmt"
@@ -18,10 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestTree builds a synthetic command tree that mirrors the shapes a real
-// CLI tree has: a root with persistent flags, a leaf with local flags, a
-// leaf that rejects an inherited flag from its PreRunE, aliases, a hidden and
-// deprecated command, and a group command that is not runnable.
+// newTestTree mirrors the shapes a real CLI tree has: a root with persistent
+// flags, a leaf with local flags, a leaf rejecting an inherited flag from PreRunE,
+// aliases, a hidden and deprecated command, and a non-runnable group.
 func newTestTree() *cobra.Command {
 	root := &cobra.Command{Use: "tool", Short: "a tool", RunE: func(*cobra.Command, []string) error { return nil }}
 	root.PersistentFlags().Duration("timeout", 10*time.Second, "per-target timeout")
@@ -197,10 +193,9 @@ func TestWalkDetectsRejectionEvenWhenAFlagWasAlreadySet(t *testing.T) {
 		"and it must not merge the ancestor's flag into the command's own FlagSet")
 }
 
-// TestWalkDoesNotMutateTheTree pins the invariant that broke once already: a
-// cobra tree is package-level state shared by every test in a binary, so a Walk
-// that merges persistent flags into a command's own FlagSet makes every later
-// test see flags the command does not declare.
+// TestWalkDoesNotMutateTheTree pins an invariant that broke once: a cobra tree is
+// package-level state, so a Walk that merges persistent flags into a command's own
+// FlagSet makes every later test see flags the command does not declare.
 func TestWalkDoesNotMutateTheTree(t *testing.T) {
 	root := newTestTree()
 	scan, _, err := root.Find([]string{"scan"})
@@ -236,10 +231,9 @@ func TestWalkIsIdenticalWhetherTheTreeWasAlreadyMerged(t *testing.T) {
 	pristine := Walk(newTestTree())
 
 	merged := newTestTree()
-	// InheritedFlags is cobra's mutating accessor: calling it folds the
-	// ancestors' persistent flags into each command's own FlagSet, which is the
-	// state Walk finds when another test rendered help or executed the tree
-	// first.
+	// InheritedFlags is cobra's mutating accessor: it folds ancestors' persistent
+	// flags into each command's own FlagSet -- the state Walk finds when another
+	// test rendered help or executed the tree first.
 	forEachCommand(merged, func(c *cobra.Command) { _ = c.InheritedFlags() })
 	require.NotNil(t, mustCommand(t, merged, "scan").Flags().Lookup("timeout"),
 		"precondition: the tree really is merged now")
@@ -380,10 +374,9 @@ func forEachCommand(cmd *cobra.Command, fn func(*cobra.Command)) {
 }
 
 // TestWalkSurvivesAPreRunEThatNeedsArgs pins the probe's recover. Probing calls
-// PreRunE outside cobra's execution lifecycle, where cobra would have validated
-// Args first — so a guard that reasonably assumes args[0] exists panics. The
-// gate must degrade to "no rejections discovered" rather than take the whole
-// build down.
+// PreRunE outside cobra's lifecycle, where Args would have been validated, so a
+// guard assuming args[0] panics. The gate degrades to "no rejections discovered"
+// rather than taking the build down.
 func TestWalkSurvivesAPreRunEThatNeedsArgs(t *testing.T) {
 	root := &cobra.Command{Use: "tool", RunE: func(*cobra.Command, []string) error { return nil }}
 	root.PersistentFlags().Duration("timeout", time.Second, "timeout")
@@ -432,11 +425,10 @@ func TestProbeDoesNotWriteThroughACopiedFlagValue(t *testing.T) {
 		"probing must not write to the real flag")
 }
 
-// TestProbeSurvivesAShorthandSharedWithAnInheritedFlag pins the shorthand strip. Adding
-// both a local flag and an inherited one carrying the same shorthand to the shadow
-// command made pflag panic, which the probe's recover then swallowed -- so rejection
-// detection silently vanished for that command, and only when the tree had not already
-// been merged by cobra.
+// TestProbeSurvivesAShorthandSharedWithAnInheritedFlag pins the shorthand strip.
+// A local and an inherited flag sharing a shorthand made pflag panic on the shadow
+// command; the probe's recover swallowed it, so rejection detection silently
+// vanished -- and only when cobra had not already merged the tree.
 func TestProbeSurvivesAShorthandSharedWithAnInheritedFlag(t *testing.T) {
 	root := &cobra.Command{Use: "tool", RunE: func(*cobra.Command, []string) error { return nil }}
 	root.PersistentFlags().StringP("target", "t", "", "target host")
@@ -470,10 +462,10 @@ func TestWalkExcludesCobrasHiddenCompletionHelpers(t *testing.T) {
 	}
 }
 
-// TestWalkKeepsALegitimateNestedHelpCommand pins that cobra's injected built-ins are
-// filtered only where cobra injects them. Filtering by name at every depth dropped a
-// real subcommand called "help" and, because collect returns rather than descends, its
-// children with it.
+// TestWalkKeepsALegitimateNestedHelpCommand pins that cobra's built-ins are
+// filtered only where cobra injects them. Filtering by name at every depth dropped
+// a real "help" subcommand and, since collect returns rather than descends, its
+// children too.
 func TestWalkKeepsALegitimateNestedHelpCommand(t *testing.T) {
 	root := &cobra.Command{Use: "tool", RunE: func(*cobra.Command, []string) error { return nil }}
 	group := &cobra.Command{Use: "group"}
@@ -491,12 +483,10 @@ func TestWalkKeepsALegitimateNestedHelpCommand(t *testing.T) {
 		"only the root's own injected help/completion are excluded")
 }
 
-// TestWalkKeepsConsumerDeclaredRootHelpAndCompletion is the case a name-only
-// filter got exactly backwards. A drift gate walks the tree without executing
-// it, and cobra injects during Execute -- so at Walk time a root-level "help" or
-// "completion" is normally the consumer's own command. Dropping it by name took
-// the gate off two real commands and turned their flags into vocabulary the doc
-// linter did not recognise.
+// TestWalkKeepsConsumerDeclaredRootHelpAndCompletion is the case a name-only filter
+// got backwards. Cobra injects during Execute, and a drift gate walks without
+// executing, so at Walk time a root-level "help" or "completion" is normally the
+// consumer's own -- dropping it by name took the gate off two real commands.
 func TestWalkKeepsConsumerDeclaredRootHelpAndCompletion(t *testing.T) {
 	root := newTestTree()
 	handbook := &cobra.Command{Use: "help [topic]", Short: "show the operator handbook", RunE: func(*cobra.Command, []string) error { return nil }}
@@ -521,11 +511,10 @@ func TestWalkKeepsConsumerDeclaredRootHelpAndCompletion(t *testing.T) {
 	assert.True(t, ok)
 }
 
-// TestWalkKeepsARootHelpCommandThatOnlyLooksLikeCobras closes the gap a
-// signature match on its own would leave. The deciding evidence is that cobra
-// registered the command as the tree's help command, not that its Use and Short
-// happen to read like cobra's -- a consumer who copied those lines still wrote
-// the command.
+// TestWalkKeepsARootHelpCommandThatOnlyLooksLikeCobras closes the gap a signature
+// match alone would leave: the deciding evidence is that cobra registered the
+// command as the tree's help command, not that its Use and Short read like
+// cobra's.
 func TestWalkKeepsARootHelpCommandThatOnlyLooksLikeCobras(t *testing.T) {
 	root := newTestTree()
 	root.AddCommand(&cobra.Command{
@@ -540,14 +529,12 @@ func TestWalkKeepsARootHelpCommandThatOnlyLooksLikeCobras(t *testing.T) {
 }
 
 // TestWalkStillExcludesCobrasInjectedBuiltinsBesideTheConsumersOwn is the other
-// half: the root-level filter has to keep working, or the surface depends on
-// whether something executed the tree. Both interplays are here.
-// InitDefaultHelpCmd checks only its own unexported slot, never whether a child
-// is already named "help", so an Execute leaves the tree carrying both commands
-// and the surface must keep the consumer's and drop cobra's.
-// InitDefaultCompletionCmd is the opposite: it declines to inject at all once
-// the tree declares a "completion" command, which is why a signature match there
-// can never be shadowing a consumer's.
+// half: the root-level filter must keep working, or the surface depends on whether
+// something executed the tree. InitDefaultHelpCmd checks only its own unexported
+// slot, so an Execute leaves both commands and the surface must keep the
+// consumer's. InitDefaultCompletionCmd is the opposite -- it declines to inject
+// once a "completion" command exists, so a signature match there can never shadow
+// a consumer's.
 func TestWalkStillExcludesCobrasInjectedBuiltinsBesideTheConsumersOwn(t *testing.T) {
 	root := newTestTree()
 	root.AddCommand(&cobra.Command{Use: "help", Short: "show the operator handbook", RunE: func(*cobra.Command, []string) error { return nil }})
@@ -633,21 +620,15 @@ func TestProbeSurvivesAGuardThatReadsTheContext(t *testing.T) {
 	assert.True(t, flag.Rejected, "the rejection must survive a guard that touches the context")
 }
 
-// TestProbeSurvivesAPreRunEUsingPflagsTypedAccessors settles a review finding
-// that claimed frozenValue "strips interfaces", so a guard calling
-// cmd.Flags().GetString would fail against the shadow command and cost the
-// command its rejections. It does not: frozenValue embeds pflag.Value, which
-// promotes Type() and String(), and pflag's typed accessors go through
-// getFlagType -- it compares Value.Type() against the name of the type it was
-// asked for and then parses Value.String(), rather than type-asserting the
-// Value to a concrete pflag type. Only Set is overridden, and no accessor
-// calls Set.
+// TestProbeSurvivesAPreRunEUsingPflagsTypedAccessors settles a review finding that
+// frozenValue "strips interfaces", failing a guard that calls GetString. It does
+// not: frozenValue embeds pflag.Value, promoting Type() and String(), and pflag's
+// typed accessors go through getFlagType, which compares Value.Type() and parses
+// Value.String() rather than asserting a concrete type. Only Set is overridden.
 //
-// The claim is worth a test rather than an argument because the failure it
-// describes would be silent: a guard whose accessor errored would return that
-// error from the baseline probe, probeRejections would read the baseline as
-// unprobeable, and every rejection on the command would vanish from the
-// surface with nothing to show it had happened.
+// It gets a test rather than an argument because the described failure is silent:
+// the baseline probe would return the accessor's error, probeRejections would read
+// the baseline as unprobeable, and every rejection would vanish from the surface.
 func TestProbeSurvivesAPreRunEUsingPflagsTypedAccessors(t *testing.T) {
 	root := &cobra.Command{Use: "tool", RunE: func(*cobra.Command, []string) error { return nil }}
 	root.PersistentFlags().Duration("timeout", 10*time.Second, "per-target timeout")
@@ -657,10 +638,9 @@ func TestProbeSurvivesAPreRunEUsingPflagsTypedAccessors(t *testing.T) {
 	kid.Flags().Bool("insecure", true, "skip verification")
 	kid.Flags().Int("retries", 3, "attempts per target")
 
-	// Every accessor call's error and value is recorded rather than asserted
-	// inline: PreRunE runs once for the baseline and once per resolved flag, and
-	// an assertion firing inside a probed guard would report against a goroutine
-	// the recover in probeRejections is about to swallow.
+	// Recorded rather than asserted inline: PreRunE runs once for the baseline and
+	// once per resolved flag, and an assertion firing inside a probed guard would
+	// report against a goroutine probeRejections' recover is about to swallow.
 	type reading struct {
 		target   string
 		insecure bool

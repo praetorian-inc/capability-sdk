@@ -112,9 +112,8 @@ func TestSpliceRejectsMarkersOnOneLine(t *testing.T) {
 
 // TestSpliceRefusesToDeleteTextSharingTheClosingMarkersLine is the destructive
 // case. endIdx is the closing marker's own offset, so "note " sat inside the
-// span splice replaces: the word vanished on the next Write with no error
-// raised and nothing in the diff to explain it. The rejection has to quote the
-// text, because the whole failure mode was that nobody could see what was lost.
+// replaced span and vanished on the next Write with nothing in the diff to explain
+// it. The rejection quotes the text, because the failure mode was invisibility.
 func TestSpliceRefusesToDeleteTextSharingTheClosingMarkersLine(t *testing.T) {
 	doc := strings.Join([]string{
 		"# Title", "", beginMarker("cli-aliases"), "body",
@@ -130,11 +129,10 @@ func TestSpliceRefusesToDeleteTextSharingTheClosingMarkersLine(t *testing.T) {
 	assert.Empty(t, out, "a rejected splice returns no document to write")
 }
 
-// TestSpliceRejectsTextSharingTheOpeningMarkersLine covers the other marker.
-// Text there is not deleted -- begin is measured from the newline that ends the
-// line -- but the layout leaves the region's first line ambiguous, and a
-// document that reads as though the note were part of the generated block is
-// exactly the confusion the closing-marker case turned destructive.
+// TestSpliceRejectsTextSharingTheOpeningMarkersLine covers the other marker. Text
+// there is not deleted -- begin is measured from the newline ending the line -- but
+// the region's first line becomes ambiguous, reading as though the note were part
+// of the generated block.
 func TestSpliceRejectsTextSharingTheOpeningMarkersLine(t *testing.T) {
 	doc := strings.Join([]string{
 		"# Title", "", beginMarker("cli-aliases") + " (regenerated nightly)", "body",
@@ -150,10 +148,9 @@ func TestSpliceRejectsTextSharingTheOpeningMarkersLine(t *testing.T) {
 }
 
 // TestSpliceRejectsAMarkerMidSentence is the single-occurrence case the count
-// guards cannot reach: prose that mentions a marker inline, or a code fence
-// showing one, is one occurrence and passes every earlier check. Splicing it
-// would replace from the end of the sentence to the closing marker, so the
-// sentence's own trailing half becomes the region's first line.
+// guards cannot reach: prose mentioning a marker inline is one occurrence and
+// passes every earlier check, yet splicing replaces from the end of the sentence
+// to the closing marker.
 func TestSpliceRejectsAMarkerMidSentence(t *testing.T) {
 	doc := strings.Join([]string{
 		"# Title", "",
@@ -171,10 +168,9 @@ func TestSpliceRejectsAMarkerMidSentence(t *testing.T) {
 }
 
 // TestSpliceRejectsAnIndentedMarker pins that whitespace is not an exception.
-// Indentation ahead of the closing marker is inside the replaced span like any
-// other text, so accepting it would silently reindent the marker on every
-// Write; and four spaces make the line a markdown indented code block, which
-// renders the marker as visible text rather than the comment it is meant to be.
+// Indentation ahead of the closing marker sits inside the replaced span, so
+// accepting it silently reindents the marker on every Write; and four spaces make
+// the line an indented code block, rendering the marker as visible text.
 func TestSpliceRejectsAnIndentedMarker(t *testing.T) {
 	doc := strings.Join([]string{
 		"# Title", "", beginMarker("cli-aliases"), "body",
@@ -266,11 +262,10 @@ func TestSpliceRejectsANestedRegionPair(t *testing.T) {
 	assert.Empty(t, out, "a rejected splice returns no document to write")
 }
 
-// TestSpliceRejectsADuplicatedBeginMarkerAlone locks the begin-marker guard on its own.
-// A README carrying two BEGIN markers and a single END would otherwise splice between the
-// first BEGIN and that single END, eating the second marker and every hand-written line
-// between them. Both markers duplicated cannot pin this: the end-marker guard alone still
-// rejects that document, so only the asymmetric case holds this guard individually.
+// TestSpliceRejectsADuplicatedBeginMarkerAlone locks the begin-marker guard alone.
+// Two BEGINs and a single END would splice between the first BEGIN and that END,
+// eating the second marker and every hand-written line between. Only the asymmetric
+// case pins this guard -- with both duplicated, the end-marker guard still rejects.
 func TestSpliceRejectsADuplicatedBeginMarkerAlone(t *testing.T) {
 	doc := strings.Join([]string{
 		"# Title",
@@ -299,10 +294,9 @@ func TestSpliceRejectsADuplicatedBeginMarkerAlone(t *testing.T) {
 	assert.Empty(t, out, "a rejected splice returns no document to write")
 }
 
-// TestSpliceRejectsADuplicatedEndMarkerAlone locks the end-marker guard on its own.
-// A single BEGIN with two ENDs would otherwise splice to the first END and leave the
-// stray second one behind as committed content. Both markers duplicated cannot pin this:
-// the begin-marker guard runs first and rejects that document before this one is reached.
+// TestSpliceRejectsADuplicatedEndMarkerAlone locks the end-marker guard alone. One
+// BEGIN with two ENDs would splice to the first END and leave the stray second as
+// committed content. With both duplicated the begin-marker guard rejects first.
 func TestSpliceRejectsADuplicatedEndMarkerAlone(t *testing.T) {
 	doc := strings.Join([]string{
 		"# Title",

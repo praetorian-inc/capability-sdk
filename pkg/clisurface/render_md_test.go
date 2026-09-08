@@ -44,15 +44,11 @@ func TestRenderMarkdownSeparatesLocalInheritedAndRejectedFlags(t *testing.T) {
 		"a rejected flag appears only in the rejected table, never as a usable option")
 }
 
-// TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands covers every
-// annotation the markdown reference can emit for a hidden or deprecated
-// command, and for a hidden or deprecated flag.
-//
-// The fixture tree's "old" command is hidden *and* deprecated, so it exercises
-// the deprecated arm and can never reach the hidden one -- which is why the
-// cases below hand-build a Surface instead. Between them the two annotation
-// helpers have no unreached branch left, which is what lets the package doc
-// claim that a change to either half fails loudly.
+// TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands covers every annotation
+// the markdown reference can emit for a hidden or deprecated command or flag. The
+// fixture tree's "old" command is hidden *and* deprecated, so it can never reach
+// the hidden arm -- hence the hand-built Surfaces below. Between them the two
+// annotation helpers have no unreached branch left.
 func TestRenderMarkdownAnnotatesHiddenAndDeprecatedCommands(t *testing.T) {
 	d := newTestDocs(t)
 
@@ -166,11 +162,10 @@ func TestRenderRegionsAliasTableOmitsCommandsWithoutAliases(t *testing.T) {
 	assert.Contains(t, body, "[docs/CLI.md](docs/CLI.md)", "the region links to the full reference")
 }
 
-// TestRenderRegionsAliasTableIsByteExactWhenAliasesExist pins the whole
-// non-empty body, not just the row. Collecting the rows before writing moved
-// the lead-in, the header and the blank line before the closing sentence
-// behind a condition, and this package's committed artifacts are compared
-// byte-for-byte, so a stray blank line is a regression, not cosmetics.
+// TestRenderRegionsAliasTableIsByteExactWhenAliasesExist pins the whole non-empty
+// body, not just the row: collecting rows before writing moved the lead-in, header
+// and blank line behind a condition, and committed artifacts are compared
+// byte-for-byte.
 func TestRenderRegionsAliasTableIsByteExactWhenAliasesExist(t *testing.T) {
 	d := newTestDocs(t)
 	s := Walk(newTestTree())
@@ -190,13 +185,11 @@ func TestRenderRegionsAliasTableIsByteExactWhenAliasesExist(t *testing.T) {
 	}, "\n"), body)
 }
 
-// TestRenderRegionsAliasTableDropsItsLeadInWhenNothingHasAliases is the case
-// the unconditional lead-in got wrong: a CLI whose subcommands declare no
-// aliases used to be handed "Some subcommands carry aliases for
-// discoverability:" above an empty two-line table -- a claim contradicted by
-// the very table meant to support it. The lead-in and the table now go
-// together, and the pointer to the full reference stays because it is true of
-// every CLI and keeps the region non-empty prose.
+// TestRenderRegionsAliasTableDropsItsLeadInWhenNothingHasAliases is what the
+// unconditional lead-in got wrong: a CLI with no aliases was handed "Some
+// subcommands carry aliases for discoverability:" above an empty two-line table.
+// The lead-in and table now go together; the pointer to the full reference stays,
+// being true of every CLI and keeping the region non-empty.
 func TestRenderRegionsAliasTableDropsItsLeadInWhenNothingHasAliases(t *testing.T) {
 	d := newTestDocs(t)
 	s := Surface{Commands: []Command{
@@ -217,10 +210,10 @@ func TestRenderRegionsAliasTableDropsItsLeadInWhenNothingHasAliases(t *testing.T
 	assert.NotEmpty(t, body, "the region still has to hold something for the splice to read as prose")
 }
 
-// TestRenderRegionsAliasTableHidesTheTableWhenOnlyHiddenCommandsHaveAliases
-// covers the boundary between the visibility filter and the emptiness test:
-// the alias-bearing command exists but is filtered out, so the row count -- not
-// the alias count -- has to be what decides.
+// TestRenderRegionsAliasTableHidesTheTableWhenOnlyHiddenCommandsHaveAliases covers
+// the boundary between the visibility filter and the emptiness test: the
+// alias-bearing command is filtered out, so the row count decides, not the alias
+// count.
 func TestRenderRegionsAliasTableHidesTheTableWhenOnlyHiddenCommandsHaveAliases(t *testing.T) {
 	d := newTestDocs(t)
 	s := Surface{Commands: []Command{
@@ -352,11 +345,9 @@ func TestRenderMarkdownEscapesADefaultContainingAPipe(t *testing.T) {
 
 // TestSubcommandRegionLeadsWithTheUpcasedRootName covers the first of T009's two
 // fixes: the ported source hard-coded the upstream tool's name in the README
-// lead-in, so any other consumer got the wrong brand. The upcase is content --
-// the sentence reads as a proper noun -- so the root's own name is title-cased
-// rather than emitted verbatim. The brutus case is the parity case: it is the
-// name the ported source hard-coded, so a tree rooted there must still produce
-// the byte-identical sentence.
+// lead-in. The upcase is content -- the sentence reads as a proper noun. The brutus
+// case is parity: it is the hard-coded name, so a tree rooted there must still
+// produce the byte-identical sentence.
 func TestSubcommandRegionLeadsWithTheUpcasedRootName(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -391,9 +382,8 @@ func TestSubcommandRegionLeadsWithTheUpcasedRootName(t *testing.T) {
 }
 
 // TestRenderRegionsLinksToTheConfiguredMarkdownPath covers the second of T009's two
-// fixes: the ported source hard-coded the reference's path in the README link, so a
-// consumer that moved its CLI reference got a README pointing at a file that does not
-// exist.
+// fixes: the hard-coded reference path meant a consumer that moved its CLI reference
+// got a README pointing at a file that does not exist.
 func TestRenderRegionsLinksToTheConfiguredMarkdownPath(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) { cfg.MarkdownPath = "documentation/reference.md" })
 	s := Walk(newTestTree())
@@ -408,16 +398,13 @@ func TestRenderRegionsLinksToTheConfiguredMarkdownPath(t *testing.T) {
 
 // --- angle-bracket escaping -------------------------------------------------
 
-// newAngleSurface is the shape the escaping fix was measured on: a cobra help
-// string carrying an argument placeholder spelled with angle brackets, in every
-// slot the markdown renderer can put one. Markdown passes raw HTML through, so
-// an unescaped "<domain>" is read as an unknown tag and VANISHES -- the
-// generated reference then documents a description other than the one it was
-// handed.
+// newAngleSurface is the shape the escaping fix was measured on: an angle-bracket
+// placeholder in every slot the markdown renderer can put one. Markdown passes raw
+// HTML through, so an unescaped "<domain>" is read as an unknown tag and VANISHES.
 //
-// The surface is hand-built rather than walked from cobra because a flag Type
-// and a RejectedReason are the two columns a cobra tree cannot be made to fill
-// with angle brackets on demand, and both of them reach the page through cell().
+// Hand-built rather than walked from cobra: a flag Type and a RejectedReason are
+// the two columns a cobra tree cannot be made to fill on demand, and both reach the
+// page through cell().
 func newAngleSurface() Surface {
 	return Surface{Commands: []Command{
 		{Path: "tool", Use: "tool", Short: "the tool", Runnable: true},
@@ -440,10 +427,9 @@ func newAngleSurface() Surface {
 	}}
 }
 
-// tableRow returns the one markdown table row that begins with token, so an
-// assertion about a single column cannot be satisfied by prose elsewhere in the
-// document -- which is exactly how an escaping test passes while the column it
-// names is still raw.
+// tableRow returns the one table row beginning with token, so an assertion about a
+// single column cannot be satisfied by prose elsewhere in the document -- exactly
+// how an escaping test passes while the column it names is still raw.
 func tableRow(t *testing.T, md, token string) string {
 	t.Helper()
 
@@ -457,11 +443,10 @@ func tableRow(t *testing.T, md, token string) string {
 	return found[0]
 }
 
-// TestRenderMarkdownEscapesAngleBracketsInEveryDescriptionColumn covers the
-// four cells cell() feeds: the command-index Description, the flag-table
-// Description, the flag-table Type, and the rejected-flag Why. Before the fix
-// cell() escaped a newline and a pipe but not an angle bracket, so a placeholder
-// in any of them was swallowed by the renderer.
+// TestRenderMarkdownEscapesAngleBracketsInEveryDescriptionColumn covers the four
+// cells cell() feeds: command-index Description, flag-table Description, flag-table
+// Type, rejected-flag Why. Before the fix cell() escaped a newline and a pipe but
+// not an angle bracket.
 func TestRenderMarkdownEscapesAngleBracketsInEveryDescriptionColumn(t *testing.T) {
 	d := newTestDocs(t)
 
@@ -483,10 +468,9 @@ func TestRenderMarkdownEscapesAngleBracketsInEveryDescriptionColumn(t *testing.T
 	assert.NotContains(t, rejected, "<scan-timeout>")
 }
 
-// TestRenderMarkdownEscapesTheCommandBodyProse covers the two slots that never
-// went through cell() at all: Short is written as a body paragraph and
-// Deprecated as a body line, so both reached the page raw however well the
-// table cells were escaped.
+// TestRenderMarkdownEscapesTheCommandBodyProse covers the two slots that never went
+// through cell(): Short as a body paragraph and Deprecated as a body line, both
+// reaching the page raw however well the table cells were escaped.
 func TestRenderMarkdownEscapesTheCommandBodyProse(t *testing.T) {
 	d := newTestDocs(t)
 
@@ -500,12 +484,10 @@ func TestRenderMarkdownEscapesTheCommandBodyProse(t *testing.T) {
 	assert.NotContains(t, scan, "tool probe <domain>")
 }
 
-// TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped is the negative half, and
-// it is the one that matters most: angle brackets are already inert inside a
-// code span or a fence, so escaping them there renders the four literal
-// characters "&lt;" to the reader. Over-escaping is the likelier future
-// regression -- it is what a well-meaning "escape everything" change produces --
-// and nothing else in the suite would catch it.
+// TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped is the negative half and the
+// one that matters most: angle brackets are already inert inside a code span or
+// fence, so escaping renders the literal "&lt;" to the reader. Over-escaping is the
+// likelier future regression and nothing else in the suite would catch it.
 func TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped(t *testing.T) {
 	d := newTestDocs(t)
 	s := newAngleSurface()
@@ -526,15 +508,12 @@ func TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped(t *testing.T) {
 	assert.NotContains(t, region, "&lt;", "nothing in the region is escaped")
 }
 
-// TestEscapeAnglesLeavesTheAmpersandAlone pins a deliberate decision, not an
-// oversight. "<" and ">" are the whole escape set: the pair is order-independent
-// (neither "&lt;" nor "&gt;" contains an angle bracket, so neither can feed the
-// other) and self-terminating, while "&" is the one character whose escaping
-// creates the double-escape problem -- it would rewrite a help string that
-// already reads "&lt;" into "&amp;lt;". CommonMark renders a bare "&" literally,
-// so escaping it buys nothing and costs correctness.
-//
-// A later "helpful" ampersand escape must fail here rather than quietly ship.
+// TestEscapeAnglesLeavesTheAmpersandAlone pins a deliberate decision. "<" and ">"
+// are the whole escape set: the pair is order-independent and self-terminating,
+// while "&" is the one character whose escaping double-escapes -- rewriting a help
+// string that already reads "&lt;" into "&amp;lt;". CommonMark renders a bare "&"
+// literally, so escaping it buys nothing. A later "helpful" ampersand escape must
+// fail here rather than quietly ship.
 func TestEscapeAnglesLeavesTheAmpersandAlone(t *testing.T) {
 	assert.Equal(t, "&lt;domain&gt;", escapeAngles("<domain>"))
 	assert.Equal(t, "", escapeAngles(""))
@@ -583,13 +562,11 @@ func TestCodeWidensItsDelimiterAroundABacktick(t *testing.T) {
 	assert.Equal(t, "```` a```b ````", code("a```b"))
 }
 
-// TestRenderMarkdownWidensTheUsageSpanAroundABacktickInUse is the case that
-// motivated moving the widening into code(): a cobra Use string may carry a
-// backtick, and a plain single-tick wrap closes the span on it -- putting the
-// rest of the value, angle-bracket placeholders included, back into live
-// markdown. usage() deliberately does not escape, precisely because the span is
-// meant to contain it, so a span that closes early is a correctness bug and not
-// a cosmetic one.
+// TestRenderMarkdownWidensTheUsageSpanAroundABacktickInUse motivated moving the
+// widening into code(): a cobra Use string may carry a backtick, and a single-tick
+// wrap closes the span on it, putting the rest of the value back into live markdown.
+// usage() deliberately does not escape because the span is meant to contain it, so a
+// span that closes early is a correctness bug.
 func TestRenderMarkdownWidensTheUsageSpanAroundABacktickInUse(t *testing.T) {
 	d := newTestDocs(t)
 	s := Surface{Commands: []Command{

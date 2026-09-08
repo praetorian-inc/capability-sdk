@@ -85,21 +85,15 @@ func regionBounds(doc, name string) (begin, end int, err error) {
 		return 0, 0, fmt.Errorf("%q and %q must be on separate lines", beginMark, endMark)
 	}
 
-	// Each marker must have its line to itself, and the closing marker is why.
-	// endIdx is the marker's own offset, so everything ahead of it on that line
-	// falls inside the span splice replaces: a line reading
-	// "note <!-- END generated: cli-aliases -->" lost the word "note" on the
-	// next Write, with no error, and nothing in the diff to say where it went.
-	// Refusing the layout is the only outcome that neither deletes hand-written
-	// text nor leaves the region's extent to a rule nobody wrote down, and it is
+	// Each marker must have its line to itself, and the closing one is why:
+	// endIdx is the marker's own offset, so anything ahead of it on that line
+	// falls inside the replaced span -- "note <!-- END generated: cli-aliases -->"
+	// lost the word "note" on the next Write, silently. Refusing the layout is
 	// what lets endIdx stand for the start of the closing marker's line.
 	//
-	// The rule is the same for both markers and admits no whitespace either, so
-	// that it can be stated in one sentence and carry one message. Indentation
-	// is not merely cosmetic here: whitespace ahead of the closing marker is
-	// inside the replaced span like any other text, and four spaces would make
-	// the marker line a markdown indented code block, rendering the marker as
-	// visible text instead of the comment it is meant to be.
+	// The rule is the same for both markers and admits no whitespace either.
+	// Indentation is not cosmetic: four spaces ahead of a marker make its line an
+	// indented code block, rendering the marker as visible text.
 	if err := requireMarkerAlone(doc, beginIdx, beginMark); err != nil {
 		return 0, 0, err
 	}

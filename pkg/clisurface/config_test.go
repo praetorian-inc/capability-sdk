@@ -11,10 +11,9 @@ import (
 // whole suite so every failure message a test inspects names the same command.
 const testRegenerateCommand = "make cli-docs"
 
-// newTestDocs builds a *Docs in one line: the required RegenerateCommand is
-// filled in, each mod adjusts the Config before construction, and a rejected
-// configuration fails the test instead of returning a nil receiver. Every
-// ported suite whose subject became a *Docs method gets its receiver from here.
+// newTestDocs builds a *Docs in one line: RegenerateCommand filled in, each mod
+// adjusting the Config before construction, and a rejected configuration failing
+// the test rather than returning a nil receiver.
 func newTestDocs(t *testing.T, mods ...func(*Config)) *Docs {
 	t.Helper()
 
@@ -103,10 +102,9 @@ func TestNew_DocsWalkRootMovesTheThreeDerivedPaths(t *testing.T) {
 	assert.Equal(t, "README.md", cfg.READMEPath, "the README is not under the docs walk root")
 }
 
-// TestNew_MarkdownPathTracksDocsWalkRoot is the config half of the §2.4
-// doc-link defect: whatever generates the README's link to the markdown
-// reference has one source of truth for that path, and it is this field.
-// The rendered-link assertion lives with the renderer.
+// TestNew_MarkdownPathTracksDocsWalkRoot is the config half of the §2.4 doc-link
+// defect: this field is the one source of truth for the README's link to the
+// markdown reference. The rendered-link assertion lives with the renderer.
 func TestNew_MarkdownPathTracksDocsWalkRoot(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) { cfg.DocsWalkRoot = "documentation" })
 
@@ -195,12 +193,10 @@ func TestValidate_RejectsAnEmptyPathField(t *testing.T) {
 	assert.Contains(t, err.Error(), "Config.JSONPath must not be empty")
 }
 
-// TestNew_AcceptsBothLintScopeHalvesEmpty pins the removal of a rejection that
-// was not true. Opting both configured halves out does not lint nothing: the
-// markdown walk seeds from LintedMarkdown and then walks DocsWalkRoot
-// unconditionally, so this configuration is "lint only the documentation tree",
-// which is a plausible posture rather than a mistake. [LintScope] is the honest
-// place to surface a run that really did reach nothing.
+// TestNew_AcceptsBothLintScopeHalvesEmpty pins the removal of an untrue rejection.
+// Opting both configured halves out does not lint nothing -- the markdown walk
+// still walks DocsWalkRoot -- so this is "lint only the documentation tree", a
+// plausible posture. [LintScope] surfaces a run that really did reach nothing.
 func TestNew_AcceptsBothLintScopeHalvesEmpty(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) {
 		cfg.LintedMarkdown = []string{}
@@ -237,10 +233,8 @@ func TestGeneratedPaths_ListsTheThreeArtifactsInStableOrder(t *testing.T) {
 }
 
 // TestNew_RejectsAnEmptyLintScopeEntry is the reachable half of the empty-path
-// rule: the scalar path fields are defaulted before validate sees them, but a
-// slice entry is not, so an empty entry arrives exactly as the caller wrote it.
-// Left unchecked it would widen the Go comment walk from the named roots to the
-// whole repository.
+// rule: scalar fields are defaulted before validate, a slice entry is not. Left
+// unchecked it widens the Go comment walk to the whole repository.
 func TestNew_RejectsAnEmptyLintScopeEntry(t *testing.T) {
 	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, LintedGoDirs: []string{""}})
 
@@ -279,10 +273,9 @@ func TestNew_RejectsIdenticalRegionNames(t *testing.T) {
 	assert.Contains(t, msg, "Config.AliasesRegion")
 }
 
-// TestNew_RejectsCollidingArtifactPaths covers the destructive case: two
-// artifact paths naming one file means generation overwrites one artifact with
-// another, and GeneratedPaths reports the same name twice, so the staging list
-// and the drift report both read as if nothing were wrong.
+// TestNew_RejectsCollidingArtifactPaths: two artifact paths naming one file means
+// generation overwrites one artifact with another while GeneratedPaths reports the
+// name twice, so staging list and drift report both read as if nothing were wrong.
 func TestNew_RejectsCollidingArtifactPaths(t *testing.T) {
 	tests := map[string]struct {
 		mod    func(*Config)
@@ -330,15 +323,11 @@ func TestNew_RejectsACollisionHiddenByAnUncleanedPath(t *testing.T) {
 	assert.Contains(t, msg, "Config.MarkdownPath")
 }
 
-// TestNew_CleansScalarPathFields replaces a test that pinned the opposite --
-// verbatim storage, on the reasoning that a path field is artifact content and
-// the caller's spelling should reach the committed bytes. That reasoning left
-// out the comparisons. A stored path field is matched against paths the
-// documentation walk produced, and those are cleaned, so an uncleaned field
-// silently fails to match itself; see
-// TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath for what that
-// cost. Cleaning is the narrowest normalisation that makes the comparisons
-// hold, and every spelling it changes names the same file.
+// TestNew_CleansScalarPathFields replaces a test that pinned verbatim storage. A
+// stored path field is matched against paths the documentation walk produced, and
+// those are cleaned, so an uncleaned field silently fails to match itself (see
+// TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath). Every spelling
+// cleaning changes names the same file.
 func TestNew_CleansScalarPathFields(t *testing.T) {
 	tests := map[string]struct{ given, want string }{
 		"a leading dot slash":   {"./docs/CLI.md", "docs/CLI.md"},
@@ -370,9 +359,8 @@ func TestNew_CleansTheWalkRootAndThePathsDerivedFromIt(t *testing.T) {
 }
 
 // TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway is why cleaning
-// runs after validate rather than before. path.Clean resolves ".." against the
-// element in front of it, so cleaning first would turn "docs/../outside.json"
-// into the perfectly valid "outside.json" and quietly widen where a Docs writes.
+// runs after validate: path.Clean would turn "docs/../outside.json" into the valid
+// "outside.json" and quietly widen where a Docs writes.
 func TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway(t *testing.T) {
 	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, JSONPath: "docs/../outside.json"})
 
@@ -382,15 +370,11 @@ func TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway(t *testing.T) 
 }
 
 // TestNew_StillRejectsAParentTraversalLintScopeEntryRatherThanCleaningItAway is
-// the slice half of TestNew_StillRejectsAParentTraversalRatherThanCleaningItAway,
-// and the reason cleaning has to run after validation for every path field
-// rather than for the scalar ones alone. path.Clean resolves ".." against the
-// element in front of it, so a lint-scope entry cleaned before validate saw it
-// arrived as a perfectly valid path naming a different tree: "cmd/.." widens the
-// Go comment walk from cmd to the whole repository, and "cmd/../internal"
-// silently retargets it to a directory the caller never named. "pkg/../.." keeps
-// its leading traversal and was rejected either way, but only on the cleaned
-// spelling -- so the message quoted a path the caller never wrote.
+// the slice half, and the reason cleaning runs after validation for every path
+// field rather than the scalar ones alone. Cleaned first, "cmd/.." widens the Go
+// comment walk to the whole repository and "cmd/../internal" retargets it to a
+// directory the caller never named; "pkg/../.." was rejected either way, but on
+// the cleaned spelling -- so the message quoted a path nobody wrote.
 func TestNew_StillRejectsAParentTraversalLintScopeEntryRatherThanCleaningItAway(t *testing.T) {
 	spellings := map[string]string{
 		"widens the walk to the whole repository":  "cmd/..",
@@ -420,24 +404,19 @@ func TestNew_StillRejectsAParentTraversalLintScopeEntryRatherThanCleaningItAway(
 }
 
 // TestCleanScalarPathLeavesAnEmptyPathEmpty guards the trap cleanPathEntries
-// already documents: path.Clean("") is ".", so cleaning an empty path field
-// would replace a missing path with one naming the walk's own root. No
-// configuration can reach it -- withDefaults fills every scalar path field and
-// validate rejects an empty one before cleaning runs -- so the guard is
-// exercised directly, which is also what keeps it from being dropped as dead
-// code by whoever adds the next path field.
+// documents: path.Clean("") is ".", replacing a missing path with the walk's own
+// root. No configuration reaches it, so the guard is exercised directly -- which
+// is what keeps it from being dropped as dead code.
 func TestCleanScalarPathLeavesAnEmptyPathEmpty(t *testing.T) {
 	assert.Equal(t, "", cleanScalarPath(""), "path.Clean would answer \".\"")
 	assert.Equal(t, "docs", cleanScalarPath("./docs/"))
 }
 
-// TestCleanPathEntriesLeavesAnEmptyEntryEmpty is the slice twin of the guard
-// above, and it is exercised directly for the same reason: cleaning runs after
-// validate, which has already rejected an empty entry by name, so no
-// configuration reaches the carve-out through New. Left untested it reads as
-// dead code to whoever touches cleanPathEntries next -- and dropping it would
-// turn the empty entry validate names into a silent walk of the entire
-// repository the moment the two ever ran in the other order again.
+// TestCleanPathEntriesLeavesAnEmptyEntryEmpty is the slice twin, exercised
+// directly for the same reason: validate has already rejected an empty entry, so
+// no configuration reaches the carve-out through New. Dropping it as dead code
+// would turn that entry into a silent whole-repository walk if the two ever ran in
+// the other order again.
 func TestCleanPathEntriesLeavesAnEmptyEntryEmpty(t *testing.T) {
 	assert.Equal(t,
 		[]string{"", "docs/guide.md", "pkg"},
@@ -445,10 +424,9 @@ func TestCleanPathEntriesLeavesAnEmptyEntryEmpty(t *testing.T) {
 		"path.Clean would answer \".\" for the empty entry")
 }
 
-// TestNew_RejectsABackslashPathField closes a gap that only shows on POSIX:
-// filepath.ToSlash is the identity there, so both halves of the absolute-path
-// predicate are the POSIX one and a Windows-shaped path slipped through as an
-// ordinary relative name.
+// TestNew_RejectsABackslashPathField closes a POSIX-only gap: filepath.ToSlash is
+// the identity there, so both halves of the absolute-path predicate are the POSIX
+// one and a Windows-shaped path slipped through as a relative name.
 func TestNew_RejectsABackslashPathField(t *testing.T) {
 	for _, value := range []string{
 		`C:\Users\me\out.json`,
@@ -473,10 +451,9 @@ func TestNew_RejectsABackslashLintScopeEntry(t *testing.T) {
 }
 
 // TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf feeds a resolved Config
-// straight back into New, which is what a consumer wrapping this package does.
-// The opt-out must survive the round trip: were an empty slice to collapse to
-// nil anywhere along it, the second New would silently re-enable the very lint
-// scope the caller opted out of.
+// back into New, as a consumer wrapping this package does. Were an empty slice to
+// collapse to nil along the way, the second New would re-enable the lint scope the
+// caller opted out of.
 func TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
 	first := newTestDocs(t, func(cfg *Config) { cfg.LintedMarkdown = []string{} }).Config()
 
@@ -487,12 +464,9 @@ func TestNew_IsIdempotentForAnExplicitlyEmptyLintScopeHalf(t *testing.T) {
 	assert.Equal(t, first, second, "a resolved Config must be a fixed point of New")
 }
 
-// TestNew_CleansSlicePathEntries is the C4 half of the cleaning rule, and the
-// reason cleanPaths must still clean the slice fields once validate has passed:
-// left uncleaned, "./docs/guide.md" and the "docs/guide.md" the documentation
-// walk produces are two distinct strings that slices.Compact cannot merge, so
-// the file is linted twice -- every issue in it reported twice and the coverage
-// sentence counting it twice.
+// TestNew_CleansSlicePathEntries is the C4 half: uncleaned, "./docs/guide.md" and
+// the walk's "docs/guide.md" are two strings slices.Compact cannot merge, so the
+// file is linted twice -- every issue reported twice, coverage counted twice.
 func TestNew_CleansSlicePathEntries(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) {
 		cfg.LintedMarkdown = []string{"./docs/guide.md", "docs/"}
@@ -505,11 +479,9 @@ func TestNew_CleansSlicePathEntries(t *testing.T) {
 }
 
 // TestNew_RejectsAPathContainingAngleBrackets is the S3 check. MarkdownPath is
-// interpolated raw into the generated alias region's body, so a path carrying a
-// region end marker splices a second marker into the README on the first Write.
-// Every later Write and the drift gate itself then hard-error with "found 2",
-// and hand repair is the only exit -- the same reason region names are held to
-// a charset.
+// interpolated raw into the alias region's body, so a path carrying a region end
+// marker splices a second marker into the README on the first Write; every later
+// Write and the drift gate then hard-error with "found 2".
 func TestNew_RejectsAPathContainingAngleBrackets(t *testing.T) {
 	for _, value := range []string{
 		"docs/CLI<!-- END generated: cli-aliases -->.md",
@@ -532,11 +504,10 @@ func TestNew_RejectsAngleBracketsInALintScopeEntry(t *testing.T) {
 }
 
 // TestNew_RejectsArtifactPathsDifferingOnlyInCase is the S4 check. On APFS and
-// NTFS two paths differing only in case are one file: New accepts them, the
-// second artifact clobbers the first, and CheckArtifacts then reports permanent
-// staleness immediately after a successful Write -- a red gate that no correct
-// regeneration can clear. A Config is portable content by design, so the rule
-// is deliberately applied on case-sensitive filesystems too.
+// NTFS such paths are one file: the second artifact clobbers the first and
+// CheckArtifacts reports permanent staleness right after a successful Write. A
+// Config is portable content, so the rule applies on case-sensitive filesystems
+// too.
 func TestNew_RejectsArtifactPathsDifferingOnlyInCase(t *testing.T) {
 	msg := newTestDocsError(t, Config{RegenerateCommand: testRegenerateCommand, JSONPath: "docs/cli.MD"})
 
@@ -546,11 +517,10 @@ func TestNew_RejectsArtifactPathsDifferingOnlyInCase(t *testing.T) {
 	assert.Contains(t, msg, `"docs/CLI.md"`)
 }
 
-// TestNew_RejectsARegenerateCommandThatCorruptsTheGeneratedNotice is the S5
-// check. The value is concatenated raw into the artifact's leading HTML comment
-// and into a markdown code span, so "-->" closes the comment early and leaves
-// the remainder as rendered body, a newline injects a heading, and a backtick
-// breaks the span.
+// TestNew_RejectsARegenerateCommandThatCorruptsTheGeneratedNotice is the S5 check.
+// The value is concatenated raw into the artifact's leading HTML comment and a
+// markdown code span: "-->" closes the comment early, a newline injects a heading,
+// a backtick breaks the span.
 func TestNew_RejectsARegenerateCommandThatCorruptsTheGeneratedNotice(t *testing.T) {
 	for name, value := range map[string]string{
 		"closes the generated notice early": "make docs --> # ",

@@ -66,9 +66,8 @@ func (f Finding) String() string {
 }
 
 // Diff compares the documented surface against the surface cobra registers and
-// returns one finding per disagreement, ordered by command path then flag name.
-// It is deliberately not a text diff: every finding names what changed so the
-// failure explains itself without the reader diffing two files by eye.
+// returns one finding per disagreement, ordered by command path then flag name. Not
+// a text diff: every finding names what changed, so the failure explains itself.
 func Diff(documented, registered Surface) []Finding {
 	var findings []Finding
 
@@ -159,19 +158,11 @@ func diffFlag(path string, doc, live *Flag) []Finding {
 	return findings
 }
 
-// Report renders findings as a failure message that says what drifted, which
-// files carry the stale copy, and the one command that fixes them. The files it
-// names are [Docs.GeneratedPaths] and the command is the resolved
-// Config.RegenerateCommand, both read from this Docs' own resolved
-// configuration, so the paths and the command it prints cannot disagree with
-// each other -- where the earlier three-argument form, taking a path list and a
-// regenerate command as separate arguments, let a caller pair two that had
-// nothing to do with one another.
-//
-// Reporting through the Docs the artifacts were generated from remains the
-// caller's responsibility. [Diff] is a free function, so a []Finding carries no
-// configuration identity, and handing findings to a different Docs names that
-// one's paths and command.
+// Report renders findings as a failure message naming what drifted, which files
+// carry the stale copy, and the command that fixes them -- both from this Docs' own
+// resolved configuration, so they cannot disagree. Reporting through the Docs the
+// artifacts came from is the caller's job: [Diff] is a free function, so a []Finding
+// carries no configuration identity.
 func (d *Docs) Report(findings []Finding) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CLI surface drift: %d disagreement(s) between the generated documentation and the cobra command tree.\n\n",

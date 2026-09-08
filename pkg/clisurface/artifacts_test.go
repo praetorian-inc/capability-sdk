@@ -10,12 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// withContributing configures the second hand-written document several fixtures
-// below are about. The pinned package linted CONTRIBUTING.md by default; this
-// one defaults to the README alone, because a consumer's repository need not
-// have a CONTRIBUTING.md and a default that names a missing file makes
-// [Docs.LintRepo] fail on a correct repository. A test whose subject is "a
-// second hand-written document" therefore names it.
+// withContributing names the second hand-written document. Defaults cover the
+// README alone: a consumer need not have a CONTRIBUTING.md, and a default naming
+// a missing file makes [Docs.LintRepo] fail on a correct repository.
 func withContributing(c *Config) {
 	c.LintedMarkdown = []string{"README.md", "CONTRIBUTING.md"}
 }
@@ -265,10 +262,8 @@ func TestLintRepoFailsWhenAConfiguredDocumentIsMissing(t *testing.T) {
 	assert.Contains(t, err.Error(), "reading CONTRIBUTING.md")
 }
 
-// TestLintRepoWalksNestedDocsDirectories pins the recursive documentation walk.
-// A document in docs/guides/ names removed flags exactly as effectively as one
-// in docs/, and a check with a silent blind spot is worse than one whose reach
-// is obvious.
+// TestLintRepoWalksNestedDocsDirectories pins the recursive documentation walk:
+// a document in docs/guides/ names removed flags as effectively as one in docs/.
 func TestLintRepoWalksNestedDocsDirectories(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -317,10 +312,9 @@ func TestLintRepoWalksTheConfiguredDocumentationRoot(t *testing.T) {
 		"the default root is not walked once the consumer names another one")
 }
 
-// TestLintRepoReachesGoComments is the reachability proof for the Go-comment
-// linter. Its own tests call it directly, so they would keep passing if
-// LintRepo stopped calling it and it shipped unreachable; this fixture's only
-// defect lives in a Go comment, so nothing but LintRepo's call can report it.
+// TestLintRepoReachesGoComments is the reachability proof: the linter's own tests
+// call it directly and would pass if LintRepo stopped calling it, so this
+// fixture's only defect lives in a Go comment.
 func TestLintRepoReachesGoComments(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -340,11 +334,9 @@ func TestLintRepoReachesGoComments(t *testing.T) {
 	assert.Contains(t, scope.GoFiles, "internal/engine/engine.go")
 }
 
-// TestLintRepoReportsTheScopeItActuallyWalked pins the scope to the walk rather
-// than to the configuration. pkg/ is configured and absent: the run must leave
-// it out of the reported scope, because a directory nobody ever opened is not
-// coverage, and a report that names it as covered is worse than one that says
-// nothing -- it asserts a reach the run did not have.
+// TestLintRepoReportsTheScopeItActuallyWalked pins the scope to the walk, not the
+// configuration. pkg/ is configured and absent, so it must stay out of the
+// reported scope: a directory nobody opened is not coverage.
 func TestLintRepoReportsTheScopeItActuallyWalked(t *testing.T) {
 	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"cmd", "pkg"} })
 	root := newFakeRepo(t, d)
@@ -375,15 +367,11 @@ func TestLintRepoReportsTheScopeItActuallyWalked(t *testing.T) {
 		"the report states the coverage the run really had")
 }
 
-// TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere is the counterpart the
-// scope test above cannot state on its own: a directory that is merely
-// configured must not be reported as walked, while one that exists and holds no
-// Go files must be, contributing zero files.
-//
-// The failure it locks out is silent. A consumer renames or typos an entry in
-// LintedGoDirs, Go-comment coverage for that tree drops to zero, and a scope
-// echoing the configuration back still names the directory as covered -- in
-// exactly the case where a silent gate is most dangerous.
+// TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere: a merely configured
+// directory must not be reported as walked, while one that exists and holds no Go
+// files must be, contributing zero files. The failure is silent -- a typo in
+// LintedGoDirs drops coverage to zero while a scope echoing the configuration
+// back still names the directory as covered.
 func TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere(t *testing.T) {
 	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"cmd", "empty", "typoed"} })
 	root := newFakeRepo(t, d)
@@ -412,11 +400,10 @@ func TestLintRepoOmitsAConfiguredGoDirectoryThatIsNotThere(t *testing.T) {
 		"the coverage sentence counts only the directories the walk reached")
 }
 
-// TestLintRepoLintsADocumentUnderTheWalkRootExactlyOnce pins the deduplication
-// of the markdown scope. Putting the README inside the documentation tree is a
-// legitimate layout -- it is defaults plus one natural choice -- and it puts the
-// configured document and the walk over the same file. Linting it twice emits
-// every issue in it verbatim twice and double-counts the coverage sentence.
+// TestLintRepoLintsADocumentUnderTheWalkRootExactlyOnce pins markdown dedup. A
+// README inside the documentation tree is a legitimate layout and puts the
+// configured document and the walk over the same file; linting it twice emits
+// every issue verbatim twice and double-counts the coverage sentence.
 func TestLintRepoLintsADocumentUnderTheWalkRootExactlyOnce(t *testing.T) {
 	d := newTestDocs(t, func(c *Config) { c.READMEPath = "docs/README.md" })
 	require.Equal(t, []string{"docs/README.md"}, d.Config().LintedMarkdown,
@@ -459,15 +446,11 @@ func TestLintRepoLintsAGoFileUnderTwoConfiguredDirectoriesOnce(t *testing.T) {
 	assert.Equal(t, "--gone-from-comments", issues[0].Token)
 }
 
-// TestLintRepoOrdersIssuesWithinOneFileByLineThenToken locks the two
-// tiebreakers of LintRepo's comparator. Ordering is not cosmetic here: the
-// issues are what a failing gate prints, and a CI log whose lines move around
-// between runs cannot be diffed against the previous failure.
-//
-// The Token tiebreaker is proved rather than merely asserted. LintMarkdown
-// emits the flags of one invocation in argv order, so the same content read
-// straight out of it hands back --zulu before --alpha; LintRepo must hand back
-// the reverse, which it can only do by comparing the tokens.
+// TestLintRepoOrdersIssuesWithinOneFileByLineThenToken locks both tiebreakers of
+// LintRepo's comparator: a CI log whose lines move between runs cannot be diffed
+// against the previous failure. The Token tiebreaker is proved, not asserted --
+// LintMarkdown emits one invocation's flags in argv order, handing back --zulu
+// before --alpha, and LintRepo must reverse that.
 func TestLintRepoOrdersIssuesWithinOneFileByLineThenToken(t *testing.T) {
 	const doc = "```bash\ntool scan --zulu --alpha\n```\n\nSee also `--mid`.\n"
 
@@ -502,10 +485,9 @@ func TestLintRepoOrdersIssuesWithinOneFileByLineThenToken(t *testing.T) {
 	}, got, "same file sorts by line, and a shared line sorts by token")
 }
 
-// TestLintRepoReturnsAGoParseErrorRatherThanSwallowingIt pins the failure mode
-// of a tree the parser cannot read. A gate that treated an unparseable file as
-// "no issues found" would report a clean repository for the one file most
-// likely to be mid-edit, so the error has to come back out of LintRepo.
+// TestLintRepoReturnsAGoParseErrorRatherThanSwallowingIt: treating an unparseable
+// file as "no issues found" would report a clean repository for the one file most
+// likely to be mid-edit.
 func TestLintRepoReturnsAGoParseErrorRatherThanSwallowingIt(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -560,10 +542,9 @@ func TestFindRepoRoot(t *testing.T) {
 	assert.Contains(t, err.Error(), "no go.mod found")
 }
 
-// TestCheckArtifactsToleratesCRLF checks that a checkout's line-ending
-// convention cannot look like documentation drift. A repository carrying no
-// .gitattributes leaves a contributor with core.autocrlf=true holding CRLF on
-// disk while the renderers emit LF.
+// TestCheckArtifactsToleratesCRLF: a checkout's line-ending convention must not
+// look like drift. Without .gitattributes, core.autocrlf=true leaves CRLF on disk
+// while the renderers emit LF.
 func TestCheckArtifactsToleratesCRLF(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -608,9 +589,7 @@ func TestCheckArtifactsStillCatchesRealDriftInACRLFCheckout(t *testing.T) {
 
 // TestArtifactGateReddens is the meta-test: it drives the whole gate end to end
 // and proves it goes red when the CLI moves under the committed documentation.
-// Every other test here checks one piece; a gate whose red path is never
-// exercised is a gate that can silently stop working while its suite stays
-// green.
+// Every other test here checks one piece.
 func TestArtifactGateReddens(t *testing.T) {
 	const allowlistPath = "docs/deliberate-mentions.txt"
 
@@ -677,11 +656,9 @@ func TestArtifactGateReddens(t *testing.T) {
 		assert.Contains(t, stale[0].String(), "Regenerate it with '"+testRegenerateCommand+"'")
 	})
 
-	// The lint half goes through LintRepo rather than LintMarkdown: LintRepo is
-	// the entry point a consumer's gate calls, and it is the one that decides
-	// which files get read at all. Handing LintMarkdown a string proves the
-	// message is right about a document the test already chose; planting the
-	// document and letting the walk find it proves the gate would have found it.
+	// Through LintRepo, not LintMarkdown: LintRepo decides which files get read
+	// at all, so planting the document and letting the walk find it proves the
+	// gate would have found it.
 	t.Run("a document naming a removed flag names the configured allowlist", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "guide.md"),
 			[]byte("```bash\ntool scan --removed-flag\n```\n"), 0o644))
@@ -699,17 +676,14 @@ func TestArtifactGateReddens(t *testing.T) {
 	})
 }
 
-// TestLintRepoSkipsANonRegularMarkdownEntry pins the rule that only regular
-// files are read. filepath.WalkDir selects by lstat, so a symlink named
-// "notes.md" satisfies the suffix test; the whole-file read that follows does
-// not lstat anything and follows it wherever it points. Pointed at /dev/zero
-// that read has no bound at all -- measured at 56 GB of live heap and still
-// climbing -- and pointed at a FIFO it never returns. Either is reachable from
-// a docs-only pull request, so the gate must select the entry, not the name.
+// TestLintRepoSkipsANonRegularMarkdownEntry pins that only regular files are
+// read. WalkDir selects by lstat, so a symlink named "notes.md" passes the suffix
+// test and the whole-file read that follows lstats nothing: pointed at /dev/zero
+// it is unbounded (measured 56 GB of live heap and climbing), at a FIFO it never
+// returns. Both are reachable from a docs-only pull request.
 //
-// A regular file outside the repository stands in for the unbounded device
-// here, because it makes the same point -- the read followed the link out of
-// the tree -- while remaining a test that terminates.
+// A regular file outside the repository stands in for the device -- same point,
+// terminating test.
 func TestLintRepoSkipsANonRegularMarkdownEntry(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -743,12 +717,10 @@ func TestLintRepoSkipsANonRegularGoEntry(t *testing.T) {
 	assert.Contains(t, scope.SkippedIrregular, "internal/x.go", "the skip is reported, never silent")
 }
 
-// TestLintRepoTreatsASymlinkedGoRootAsAbsent pins the difference between the
-// two things a scope can say about a directory. os.Stat follows a symlink, so a
-// symlinked root passed the existence gate and was appended to GoDirs; WalkDir
-// then lstatted it, saw a non-directory, and walked nothing. The report read
-// "1 Go file(s) under 1 Go dir(s) [internal]" while linting zero files, which
-// is the exact silence LintScope exists to break.
+// TestLintRepoTreatsASymlinkedGoRootAsAbsent: os.Stat follows a symlink, so a
+// symlinked root passed the existence gate and reached GoDirs; WalkDir then
+// lstatted it, saw a non-directory, and walked nothing. The report read "1 Go
+// file(s) under 1 Go dir(s) [internal]" while linting zero files.
 func TestLintRepoTreatsASymlinkedGoRootAsAbsent(t *testing.T) {
 	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"internal"} })
 	root := newFakeRepo(t, d)
@@ -767,9 +739,8 @@ func TestLintRepoTreatsASymlinkedGoRootAsAbsent(t *testing.T) {
 }
 
 // TestLintRepoCompactsADuplicatedGoDirectory pins C3. Nothing rejects a repeated
-// entry in LintedGoDirs, and the repeat reached the coverage sentence as
-// "under 2 Go dir(s) [pkg, pkg]" -- a count of configuration, where the whole
-// contract of LintScope is that it counts what was walked.
+// LintedGoDirs entry, and the repeat reached the coverage sentence as "under 2 Go
+// dir(s) [pkg, pkg]" -- a count of configuration, not of what was walked.
 func TestLintRepoCompactsADuplicatedGoDirectory(t *testing.T) {
 	d := newTestDocs(t, func(c *Config) { c.LintedGoDirs = []string{"pkg", "pkg"} })
 	root := newFakeRepo(t, d)
@@ -784,12 +755,11 @@ func TestLintRepoCompactsADuplicatedGoDirectory(t *testing.T) {
 	assert.Contains(t, LintReport(nil, scope), "under 1 Go dir(s) [pkg]")
 }
 
-// TestWriteRefusesToFollowASymlinkedArtifact pins S2. validatePath rules on the
-// shape of a string; the escape is in the filesystem. With docs/CLI.md a
-// symlink into another tree, Write returned nil and overwrote the file it
-// pointed at -- mode preserved, so the overwrite left no fingerprint. The
-// refusal has to be a returned error rather than a skip, because a silent skip
-// would leave CheckArtifacts reporting drift no regeneration could clear.
+// TestWriteRefusesToFollowASymlinkedArtifact pins S2. validatePath rules on a
+// string's shape; the escape is in the filesystem. With docs/CLI.md a symlink into
+// another tree, Write returned nil and overwrote the file it pointed at, mode
+// preserved. An error rather than a skip: a silent skip leaves CheckArtifacts
+// reporting drift no regeneration can clear.
 func TestWriteRefusesToFollowASymlinkedArtifact(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -808,10 +778,9 @@ func TestWriteRefusesToFollowASymlinkedArtifact(t *testing.T) {
 	assert.Equal(t, "private\n", string(content), "the file the symlink pointed at is untouched")
 }
 
-// TestFindRepoRootRequiresARegularGoMod pins S11. os.Stat reports neither type
-// nor follow-status, so either decoy below selects a root the caller did not
-// mean -- and the root decides where every artifact is written and which trees
-// are linted, so choosing it wrongly relocates the whole run.
+// TestFindRepoRootRequiresARegularGoMod pins S11. os.Stat reports neither type nor
+// follow-status, so either decoy below selects a root the caller did not mean --
+// and the root decides where every artifact is written.
 func TestFindRepoRootRequiresARegularGoMod(t *testing.T) {
 	t.Run("a directory named go.mod is not a module root", func(t *testing.T) {
 		root := t.TempDir()
@@ -840,17 +809,14 @@ func TestFindRepoRootRequiresARegularGoMod(t *testing.T) {
 	})
 }
 
-// TestCheckArtifactsRefusesToFollowASymlinkedREADME pins the read half of the
-// rule Write already enforces on the write half. Trust attaches to the Config
-// value, not to what that value resolves to: a documentation-only change can
-// replace the repository's own README with a symlink, and the splice read in
-// artifacts followed it -- reading a file outside the tree and rendering it
-// into the artifact the gate then compares.
+// TestCheckArtifactsRefusesToFollowASymlinkedREADME is the read half of the rule
+// Write enforces on the write half. Trust attaches to the Config value, not what
+// it resolves to: a documentation-only change can replace the README with a
+// symlink, and the splice read followed it -- reading outside the tree and
+// rendering that into the artifact the gate compares.
 //
-// A copy of the real README stands in for the victim, so the splice succeeds
-// and the pinned behaviour is the refusal rather than an incidental marker
-// error. A regular file outside the repository stands in for the unbounded
-// device for the reason given on TestLintRepoSkipsANonRegularMarkdownEntry.
+// A copy of the real README stands in for the victim so the splice succeeds and
+// the pinned behaviour is the refusal, not an incidental marker error.
 func TestCheckArtifactsRefusesToFollowASymlinkedREADME(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -874,16 +840,13 @@ func TestCheckArtifactsRefusesToFollowASymlinkedREADME(t *testing.T) {
 	assert.Equal(t, string(original), string(content), "the file the symlink pointed at is untouched")
 }
 
-// TestCheckArtifactsRefusesToFollowASymlinkedArtifact is the drift-check half.
-// The comparison read is a whole-file read of a configured path and followed a
-// symlink exactly as the splice read did.
+// TestCheckArtifactsRefusesToFollowASymlinkedArtifact is the drift-check half: the
+// comparison read followed a symlink exactly as the splice read did.
 //
-// The refusal is an error rather than a Staleness because Staleness.String ends
-// every line with "Regenerate it with '<command>'", and Write refuses this same
-// file: a Staleness here would advise a repair that cannot run, which is the
-// drift no correct regeneration can clear that the Write guard exists to
-// prevent, reached by a politer route. The operator's repair is to remove the
-// non-regular file, and only an error can say so.
+// An error rather than a Staleness, because Staleness.String ends every line with
+// "Regenerate it with '<command>'" and Write refuses this same file -- advising a
+// repair that cannot run. The operator's repair is to remove the non-regular
+// file, and only an error can say so.
 func TestCheckArtifactsRefusesToFollowASymlinkedArtifact(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -903,13 +866,11 @@ func TestCheckArtifactsRefusesToFollowASymlinkedArtifact(t *testing.T) {
 	assert.Equal(t, "private\n", string(content), "the file the symlink pointed at is untouched")
 }
 
-// TestLoadAllowlistRefusesANonRegularFile pins the allowlist read. A missing
-// allowlist is deliberately an empty allowlist rather than an error, and that
-// is exactly why a non-regular one may not be folded into the same branch: the
-// file is present, and reporting it as absent silences nothing while turning
-// every deliberately documented token into a lint issue -- a red gate whose
-// stated cause is a token that was allowlisted all along. It is one required
-// input, not a collection, so the failure is an error.
+// TestLoadAllowlistRefusesANonRegularFile. A missing allowlist is deliberately an
+// empty one, which is why a non-regular one may not join that branch: the file is
+// present, and reading it as absent turns every documented token into a lint issue
+// -- a red gate whose stated cause was allowlisted all along. One required input,
+// not a collection, so it errors.
 func TestLoadAllowlistRefusesANonRegularFile(t *testing.T) {
 	d := newTestDocs(t)
 	root := newFakeRepo(t, d)
@@ -925,18 +886,13 @@ func TestLoadAllowlistRefusesANonRegularFile(t *testing.T) {
 	assert.False(t, allow.Allows("--removed-flag"), "nothing outside the repository was read")
 }
 
-// TestLintRepoSkipsANonRegularConfiguredMarkdownEntry is the seeded half of the
-// rule TestLintRepoSkipsANonRegularMarkdownEntry pins for the walk.
-// lintedMarkdownFiles seeded its result from Config.LintedMarkdown without
-// inspecting the entries, so a configured document that had become a symlink
-// reached the whole-file read that the walk-discovered entries beside it are
-// protected from -- the same read, the same hazard, selected by a different
-// route.
-//
-// Skipping and reporting rather than erroring is what makes this consistent
-// with the walk: a configured document is one of a collection, and
-// LintScope.SkippedIrregular already exists to keep the resulting gap in
-// coverage visible.
+// TestLintRepoSkipsANonRegularConfiguredMarkdownEntry is the seeded half of what
+// TestLintRepoSkipsANonRegularMarkdownEntry pins for the walk: lintedMarkdownFiles
+// seeded from Config.LintedMarkdown without inspecting entries, so a configured
+// document that had become a symlink reached the same unprotected read by a
+// different route. It skips rather than errors, as the walk does -- a configured
+// document is one of a collection, and LintScope.SkippedIrregular keeps the gap
+// visible.
 func TestLintRepoSkipsANonRegularConfiguredMarkdownEntry(t *testing.T) {
 	d := newTestDocs(t, withContributing)
 	root := newFakeRepo(t, d)

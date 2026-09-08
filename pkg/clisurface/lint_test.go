@@ -176,11 +176,9 @@ func TestLintMarkdownResolvesSubcommandsAndAliases(t *testing.T) {
 }
 
 // TestLintMarkdownResolvesAConsumerDeclaredCompletionCommand is the downstream
-// cost of dropping a root-level command from the surface by name. The linter
-// resolves every documented invocation against the surface, so a command missing
-// from it turns each documented use into an unknown-subcommand issue and each of
-// its flags into an unknown flag -- the gate reporting drift against a command
-// that is not actually drifting.
+// cost of dropping a root-level command from the surface by name: every documented
+// use becomes an unknown-subcommand issue and every flag an unknown flag -- drift
+// reported against a command that is not drifting.
 func TestLintMarkdownResolvesAConsumerDeclaredCompletionCommand(t *testing.T) {
 	d := newTestDocs(t)
 	root := newTestTree()
@@ -336,13 +334,12 @@ func TestIssueInAGeneratedFilePointsAtRegeneration(t *testing.T) {
 	}
 }
 
-// TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath is the defect that
-// cleaning the scalar path fields fixes. The file on an issue comes from the
-// documentation walk and so is cleaned, while the path it is compared against
-// came from the Config -- so a caller who wrote "./docs/CLI.md" made the two
-// unequal for the same file, and every lint hit inside the generated reference
-// was advertised as prose to hand-edit or allowlist, which is precisely what the
-// message it should have printed tells the reader not to do.
+// TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath is the defect
+// cleaning the scalar path fields fixes. An issue's file comes cleaned from the
+// walk while the path it is compared against came from the Config, so
+// "./docs/CLI.md" made the two unequal for the same file and every hit inside the
+// generated reference was advertised as prose to hand-edit -- the opposite of what
+// the message should have said.
 func TestIssueInAGeneratedFileIsRecognisedThroughAnUncleanedPath(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) { cfg.MarkdownPath = "./docs/CLI.md" })
 
@@ -378,10 +375,9 @@ func TestTokensOfIssuesAreStable(t *testing.T) {
 	assert.Equal(t, []string{"--aaa", "--bbb"}, tokensOf(d.LintMarkdown(s, "README.md", doc, emptyAllowlist(t))))
 }
 
-// TestLintMarkdownResolvesSubcommandsAcrossGlobalFlags pins the fix for the
-// linter's worst failure mode: a global flag written before the subcommand used
-// to stop subcommand resolution, so every later flag was validated against the
-// root and a perfectly valid example was reported as drift.
+// TestLintMarkdownResolvesSubcommandsAcrossGlobalFlags: a global flag written
+// before the subcommand used to stop resolution, so every later flag was validated
+// against the root and a valid example was reported as drift.
 func TestLintMarkdownResolvesSubcommandsAcrossGlobalFlags(t *testing.T) {
 	d := newTestDocs(t)
 	s := Walk(newTestTree())
@@ -458,10 +454,9 @@ func TestLintMarkdownStillCatchesFlagsAfterAResolvedSubcommand(t *testing.T) {
 		"the flag is checked against the command the global flag did not hide")
 }
 
-// TestSubcommandIssueDoesNotOfferTheFlagAllowlist checks the advice matches the
-// token. The allowlist holds flag tokens only, so pointing a misspelled
-// subcommand at it would send the reader to write an entry ParseAllowlist
-// rejects.
+// TestSubcommandIssueDoesNotOfferTheFlagAllowlist: the allowlist holds flag tokens
+// only, so pointing a misspelled subcommand at it sends the reader to write an
+// entry ParseAllowlist rejects.
 func TestSubcommandIssueDoesNotOfferTheFlagAllowlist(t *testing.T) {
 	d := newTestDocs(t)
 	issue := d.stamp(Issue{
@@ -494,11 +489,9 @@ func TestLintMarkdownTreatsHelpAsBoolean(t *testing.T) {
 	}
 }
 
-// TestLintMarkdownJudgesEveryFlagAgainstTheResolvedCommand pins the order of the
-// two stages. cobra dispatches to the resolved command and parses the whole argv
-// against that command's flag set, so writing a flag before the subcommand does
-// not excuse it: a flag the command rejects, and a flag local to the root, both
-// fail at runtime wherever they appear.
+// TestLintMarkdownJudgesEveryFlagAgainstTheResolvedCommand pins the stage order.
+// cobra parses the whole argv against the resolved command's flag set, so writing a
+// flag before the subcommand does not excuse it.
 func TestLintMarkdownJudgesEveryFlagAgainstTheResolvedCommand(t *testing.T) {
 	d := newTestDocs(t)
 	s := Walk(newTestTree())
@@ -556,10 +549,9 @@ func TestLintMarkdownKeepsExplicitlyEmptyArguments(t *testing.T) {
 	assert.Equal(t, "--gone", issues[0].Token)
 }
 
-// TestLintMarkdownRespectsFenceLength pins the fence run length. A block opened with
-// four backticks may contain a three-backtick line as content, and closing on it early
-// inverts the fence state for the whole rest of the document -- so prose afterwards is
-// read as shell and never checked as prose.
+// TestLintMarkdownRespectsFenceLength: a block opened with four backticks may
+// contain a three-backtick line as content, and closing on it early inverts the
+// fence state for the rest of the document.
 func TestLintMarkdownRespectsFenceLength(t *testing.T) {
 	d := newTestDocs(t)
 	s := Walk(newTestTree())
@@ -598,10 +590,9 @@ func TestLintGoCommentsIgnoresSentencePunctuation(t *testing.T) {
 	assert.Equal(t, "--nonexistent", issues[0].Token, "and reported without the punctuation")
 }
 
-// TestLintMarkdownNamesTheConfiguredAllowlistPath is one half of the Config seam's
-// proof: the advice a real issue carries has to name the allowlist the receiver was
-// configured with, not the default the ported source hard-coded. A non-default path
-// is the only value that can tell the two apart.
+// TestLintMarkdownNamesTheConfiguredAllowlistPath: an issue's advice must name the
+// allowlist the receiver was configured with, not the default the ported source
+// hard-coded. Only a non-default path tells the two apart.
 func TestLintMarkdownNamesTheConfiguredAllowlistPath(t *testing.T) {
 	d := newTestDocs(t, func(cfg *Config) { cfg.AllowlistPath = "etc/allowed-flags.txt" })
 	s := Walk(newTestTree())
@@ -615,10 +606,9 @@ func TestLintMarkdownNamesTheConfiguredAllowlistPath(t *testing.T) {
 	assert.NotContains(t, rendered, "docs/cli-surface-allow.txt", "and not the default it replaced")
 }
 
-// TestZeroIssueRendersWithoutAnyConfiguredPath pins the documented cost of stamping.
-// An Issue a caller builds itself carries no resolved Config, and String has to stay
-// safe on it: no panic, and -- because it cannot name an artifact it was never told
-// about -- no claim that the file is generated.
+// TestZeroIssueRendersWithoutAnyConfiguredPath pins the cost of stamping: an Issue
+// a caller built carries no resolved Config, so String must not panic and must not
+// claim the file is generated.
 func TestZeroIssueRendersWithoutAnyConfiguredPath(t *testing.T) {
 	var zero Issue
 
@@ -629,10 +619,9 @@ func TestZeroIssueRendersWithoutAnyConfiguredPath(t *testing.T) {
 	assert.NotContains(t, rendered, "is generated", "an unstamped issue must not claim a file is generated")
 }
 
-// TestLintReportStatesAScopeThatMatchedNothing is the visible-zero check. A walk root
-// that is missing, or is a symlink, lints no files at all, and a report that says only
-// that there were no issues reads exactly like a clean repository. The scope line is
-// what makes the difference legible.
+// TestLintReportStatesAScopeThatMatchedNothing is the visible-zero check: a missing
+// or symlinked walk root lints nothing, and "no issues" alone reads exactly like a
+// clean repository.
 func TestLintReportStatesAScopeThatMatchedNothing(t *testing.T) {
 	report := LintReport(nil, LintScope{})
 
@@ -663,18 +652,16 @@ func TestLintReportCountsTheScopeItWasGiven(t *testing.T) {
 
 // --- positional arguments vs. misspelled subcommands ------------------------
 
-// newPositionalSurface fills out the 2x2 of Runnable x hasArgSketch among
-// commands that HAVE children, which is the only quadrant reportsBogusSubcommand
-// looks at. Each cell is a real cobra shape:
+// newPositionalSurface fills out the 2x2 of Runnable x hasArgSketch among commands
+// that HAVE children, the only quadrant reportsBogusSubcommand looks at:
 //
 //	titus github  runnable, sketches [owner/repo]  -- dispatches and takes an arg
 //	titus notes   runnable, no sketch              -- the common root-like shape
-//	titus report  not runnable, sketches <format>  -- a grouping parent whose Use
-//	                                                  mis-advertises an argument
+//	titus report  not runnable, sketches <format>  -- Use mis-advertises an argument
 //	titus group   not runnable, no sketch          -- the classic grouping parent
 //
-// It is hand-built because a cobra tree cannot express "not runnable yet
-// sketches an argument" without also giving the command a RunE.
+// Hand-built: a cobra tree cannot express "not runnable yet sketches an argument"
+// without also giving the command a RunE.
 func newPositionalSurface() Surface {
 	return Surface{Commands: []Command{
 		{Path: "titus", Use: "titus", Short: "the tool", Runnable: true},
@@ -694,12 +681,10 @@ func newPositionalSurface() Surface {
 }
 
 // TestLintMarkdownAcceptsAPositionalOnAParentThatTakesOne is the false positive
-// that was measured on titus. Its README documents "titus github owner/repo",
-// which is correct: the command dispatches to subcommands AND takes an
-// owner/repo argument of its own. The linter reported the argument as a
-// misspelled subcommand, and there was no escape -- ParseAllowlist rejects any
-// entry that does not start with "-" -- so the only way to clear the report was
-// to rewrite a true documentation line into a false one.
+// measured on titus, whose README correctly documents "titus github owner/repo" --
+// the command dispatches to subcommands AND takes an argument. The linter called
+// the argument a misspelled subcommand, and ParseAllowlist rejects any entry not
+// starting with "-", so the only escape was to make a true line false.
 func TestLintMarkdownAcceptsAPositionalOnAParentThatTakesOne(t *testing.T) {
 	t.Parallel()
 
@@ -720,10 +705,9 @@ func TestLintMarkdownAcceptsAPositionalOnAParentThatTakesOne(t *testing.T) {
 }
 
 // TestLintMarkdownReportsABogusSubcommandOnlyWhenTheParentTakesNoArgument walks
-// every cell of the Runnable x hasArgSketch table. Both conjuncts of
-// takesPositional are load-bearing and each has a cell that fails alone if it is
-// dropped: widening to "Runnable" alone breaks the notes row, and narrowing to
-// "hasArgSketch" alone breaks the report row.
+// every cell of the table. Both conjuncts of takesPositional are load-bearing:
+// "Runnable" alone breaks the notes row, "hasArgSketch" alone breaks the report
+// row.
 func TestLintMarkdownReportsABogusSubcommandOnlyWhenTheParentTakesNoArgument(t *testing.T) {
 	t.Parallel()
 
@@ -788,15 +772,11 @@ func TestLintMarkdownReportsABogusSubcommandOnlyWhenTheParentTakesNoArgument(t *
 	}
 }
 
-// TestLintMarkdownStillCatchesATypoUnderARunnableRoot is the exact regression a
-// first attempt at this fix introduced: keying on "has children && !Runnable"
-// looked right and was not. A root with a RunE and subcommands is the
-// overwhelmingly common cobra shape -- the fixture root in surface_test.go is
-// one -- so Runnable alone silently switched off top-level typo detection for
-// nearly every CLI, which is the one place a documentation typo is most likely
-// and where the suggestion pays off most.
-//
-// Runnable is necessary but not sufficient: the command must also declare an
+// TestLintMarkdownStillCatchesATypoUnderARunnableRoot is the regression a first
+// attempt introduced: keying on "has children && !Runnable" looked right and was
+// not. A root with a RunE and subcommands is the common cobra shape, so Runnable
+// alone silently switched off top-level typo detection for nearly every CLI.
+// Runnable is necessary but not sufficient -- the command must also declare an
 // argument before a positional is read as one.
 func TestLintMarkdownStillCatchesATypoUnderARunnableRoot(t *testing.T) {
 	t.Parallel()
@@ -844,10 +824,9 @@ func TestLintMarkdownReportsATypoUnderCobrasCommandPlaceholder(t *testing.T) {
 }
 
 // TestHasArgSketchRecognizesBothArgumentConventions covers the shapes cobra Use
-// strings actually take. Neither convention is dominant in this codebase --
-// titus writes "[owner/repo]" and umber writes "<name>" -- and the two tokens
-// cobra itself contributes ("[flags]" and a bare shorthand) must not read as
-// arguments, or every command with a flag would accept any positional.
+// strings take: titus writes "[owner/repo]", umber writes "<name>", and cobra's own
+// "[flags]" and bare shorthand must not read as arguments -- otherwise every
+// command with a flag accepts any positional.
 func TestHasArgSketchRecognizesBothArgumentConventions(t *testing.T) {
 	t.Parallel()
 
@@ -884,10 +863,9 @@ func TestHasArgSketchRecognizesBothArgumentConventions(t *testing.T) {
 }
 
 // TestLintMarkdownStopsResolvingAtTheFirstArgument pins the unconditional
-// "resolving = false" on every non-child path out of the arm. Once a token has
-// been read as an argument rather than a subcommand, later bare words are that
-// command's remaining arguments -- they must not advance the resolved command,
-// or every flag after them is judged against the wrong one.
+// "resolving = false" on every non-child path out of the arm: later bare words are
+// remaining arguments, and advancing on them judges every following flag against
+// the wrong command.
 func TestLintMarkdownStopsResolvingAtTheFirstArgument(t *testing.T) {
 	t.Parallel()
 
@@ -925,17 +903,13 @@ func TestLintMarkdownStopsResolvingAtTheFirstArgument(t *testing.T) {
 	})
 }
 
-// TestLintMarkdownKnownLimitationTypoUnderAnArgumentTakingParent records a real
-// cost of this fix rather than an accident. Under a parent that both runs and
-// declares an argument, a genuine subcommand typo is now indistinguishable from
-// that argument and is accepted in silence.
-//
-// The trade is deliberate and asymmetric in the right direction: a missed typo
-// leaves documentation that a reader can still follow, while the false positive
-// it replaces pushed porters into rewriting correct documentation into incorrect
-// documentation. Narrowing it would need cobra's Args validator in the surface,
-// which surface.go cannot gain without invalidating every consumer's committed
-// golden.
+// TestLintMarkdownKnownLimitationTypoUnderAnArgumentTakingParent records a cost of
+// this fix, not an accident: under a parent that both runs and declares an
+// argument, a genuine typo is indistinguishable from that argument and accepted in
+// silence. The trade is asymmetric in the right direction -- a missed typo leaves
+// documentation a reader can follow, while the false positive it replaces pushed
+// porters into making correct documentation wrong. Narrowing it needs cobra's Args
+// validator in the surface, which would invalidate every consumer's golden.
 func TestLintMarkdownKnownLimitationTypoUnderAnArgumentTakingParent(t *testing.T) {
 	t.Parallel()
 
@@ -949,16 +923,12 @@ func TestLintMarkdownKnownLimitationTypoUnderAnArgumentTakingParent(t *testing.T
 		"known limitation: indistinguishable from the [owner/repo] argument the command declares: %v", tokensOf(issues))
 }
 
-// TestLintMarkdownKnownLimitationUndeclaredPositionalIsStillReported records the
-// other half of the trade. The fix reads the Use string, so a command that
-// really takes a positional but does not sketch it there is still reported --
-// the false positive survives for exactly those commands.
-//
-// This one has a cheap fix available to the porter, and that is why it is
-// acceptable: adding the argument to Use is a one-line change that improves
-// "--help" at the same time. Widening the predicate to drop the sketch
-// requirement is what must not happen, and the notes row of the 2x2 above fails
-// if it does.
+// TestLintMarkdownKnownLimitationUndeclaredPositionalIsStillReported is the other
+// half of the trade: the fix reads the Use string, so a command that takes a
+// positional without sketching it there is still reported. It is acceptable because
+// the porter's fix is one line and improves "--help" too. Widening the predicate to
+// drop the sketch requirement is what must not happen -- the notes row of the 2x2
+// above fails if it does.
 func TestLintMarkdownKnownLimitationUndeclaredPositionalIsStillReported(t *testing.T) {
 	t.Parallel()
 

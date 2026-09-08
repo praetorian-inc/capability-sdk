@@ -134,17 +134,13 @@ func TestParseJSONWrapsTheDecoderError(t *testing.T) {
 	assert.Contains(t, err.Error(), "parsing cli surface json", "and the wrapper still says what failed")
 }
 
-// TestJSONAndMarkdownDisagreeAboutHTMLEscapingOnPurpose renders one surface
-// through both writers and asserts each side of a deliberate asymmetry, so that
-// "the two renderers disagree" cannot be mistaken for a bug and unified.
-//
-// They disagree because their consumers do. JSON is a machine artifact whose
-// consumers -- committed goldens, diff tooling, anything that reads a help
-// string back out -- need the bytes cobra produced, which is why renderJSON
-// turns Go's HTML escaping off. Markdown is rendered as HTML, so the same bytes
-// placed in prose or a table cell are read as markup and silently dropped;
-// there, escaping is what preserves the help string. Unifying either direction
-// corrupts one of the two artifacts.
+// TestJSONAndMarkdownDisagreeAboutHTMLEscapingOnPurpose asserts each side of a
+// deliberate asymmetry, so "the two renderers disagree" cannot be mistaken for a
+// bug and unified. They disagree because their consumers do: JSON's consumers --
+// goldens, diff tooling -- need the bytes cobra produced, which is why renderJSON
+// turns Go's HTML escaping off, while markdown is rendered as HTML, where the same
+// bytes are read as markup and silently dropped. Unifying either direction corrupts
+// one of the two artifacts.
 func TestJSONAndMarkdownDisagreeAboutHTMLEscapingOnPurpose(t *testing.T) {
 	d := newTestDocs(t)
 	const short = "serve on http://127.0.0.1:<port> & wait"

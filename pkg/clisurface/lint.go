@@ -10,31 +10,12 @@ import (
 	"strings"
 )
 
-// usePlaceholders are the Use-string fields that describe the shape of an
-// invocation rather than sketching a positional argument, so hasArgSketch must
-// not read any of them as one.
-//
-// "[flags]" is cobra's own, appended verbatim to the usage line of any command
-// that has flags. The other four mean "a subcommand goes here": cobra writes
-// "[command]" itself -- in its usage template, and as the Use of the help
-// command it generates -- and the angle-bracket and "subcommand" spellings are
-// the same convention written by hand, which this codebase's Use strings mix
-// freely for real arguments too ("[owner/repo]" beside "<domain>").
-//
-// Reading "[command]" as an argument was a measured false negative, and the
-// worst-placed one available: a command whose Use says a subcommand goes here
-// is exactly where a misspelled subcommand in prose is most certainly a typo,
-// and takesPositional went silent there. With "config [command]" runnable over
-// a child "show", "tool config shwo" drew no finding at all.
-//
-// Membership is case-folded. Cobra emits only the lowercase spellings, but the
-// four hand-written ones carry no such guarantee, and "[COMMAND]" names a
-// subcommand slot just as plainly as "[command]" does. Folding errs toward
-// reporting -- a skipped field makes hasArgSketch answer false, which keeps the
-// linter talking -- which is the recoverable direction hasArgSketch already
-// documents: the porter clears a report by naming the argument in Use, and
-// gains a truer "--help" doing it, whereas silence hides a real typo with
-// nothing to signal that it did.
+// usePlaceholders are the Use-string fields describing an invocation's shape rather
+// than sketching a positional, so hasArgSketch must not read one as an argument.
+// Reading "[command]" as an argument was a measured false negative: with "config
+// [command]" runnable over a child "show", "tool config shwo" drew no finding.
+// Membership is case-folded -- the hand-written spellings carry no lowercase
+// guarantee.
 var usePlaceholders = map[string]bool{
 	"[flags]":      true,
 	"[command]":    true,
@@ -43,10 +24,9 @@ var usePlaceholders = map[string]bool{
 	"<subcommand>": true,
 }
 
-// longFlagPattern matches a long flag token in prose or in a Go comment.
-// Group 2 is the token. The leading group requires the dashes to start a word,
-// so neither "// -----" rule comments, nor "--" used as a dash-dash separator,
-// nor "dash--dash" inside a word can look like a flag.
+// longFlagPattern matches a long flag token in prose or a Go comment; group 2 is
+// the token. The leading group requires the dashes to start a word, so "// -----"
+// rules, a "--" separator and "dash--dash" cannot look like flags.
 var longFlagPattern = regexp.MustCompile(`(^|[^A-Za-z0-9_])(--[a-zA-Z0-9][a-zA-Z0-9._-]*)`)
 
 // backtickPattern matches an inline code span on a single line.
@@ -60,9 +40,8 @@ type Issue struct {
 	// Line is the 1-based line the reference appears on.
 	Line int
 	// Token is the offending token exactly as written, dashes included. No
-	// example of a removed flag is given here: this package's own comments are
-	// linted, and allowlisting a real removed flag to quote it would suppress
-	// that name everywhere, including in the README the gate exists to police.
+	// example: this package's own comments are linted, so quoting a real removed
+	// flag would need an allowlist entry suppressing that name everywhere.
 	Token string
 	// Command is the command the token was checked against, empty when the
 	// token was checked against the whole surface (prose and Go comments).
@@ -73,27 +52,21 @@ type Issue struct {
 	// close.
 	Suggestion string
 	// Subcommand reports whether Token is a subcommand name rather than a flag.
-	// The two get different advice: the allowlist only holds flag tokens (see
-	// [Docs.ParseAllowlist]), so offering it for a misspelled subcommand would
-	// send the reader to write an entry the allowlist parser rejects.
+	// The allowlist holds flag tokens only (see [Docs.ParseAllowlist]), so
+	// offering it for a subcommand sends the reader to write a rejected entry.
 	Subcommand bool
 
-	// The four fields below are the resolved [Config] values [Issue.String]
-	// needs in order to name a path or a command. A producing method stamps
-	// them in (see stamp), which is what lets String keep its exact wording
-	// without taking a receiver or four more arguments. The cost is that an
-	// Issue a caller builds itself renders without them: String stays safe on
-	// the zero value -- naming no artifact and offering no allowlist path --
-	// rather than panicking.
+	// The four fields below are the resolved [Config] values [Issue.String] needs
+	// to name a path or a command, stamped in by the producing method (see stamp)
+	// so String needs no receiver. A caller-built Issue renders without them.
 	jsonPath          string
 	markdownPath      string
 	allowlistPath     string
 	regenerateCommand string
 }
 
-// stamp records the resolved [Config] values [Issue.String] needs on one issue.
-// Every method that produces issues passes each of them through here, so what a
-// rendered issue names is what its own Docs was configured with, and never a
+// stamp records the resolved [Config] values [Issue.String] needs, so a
+// rendered issue names what its own Docs was configured with rather than a
 // package-level default the consumer never chose.
 func (d *Docs) stamp(i Issue) Issue {
 	i.jsonPath = d.cfg.JSONPath
@@ -136,15 +109,9 @@ func (i Issue) String() string {
 	return b.String()
 }
 
-// whollyGenerated reports whether every line of the issue's file is generated,
-// and so must never be hand-edited. The configured README is deliberately
-// excluded: only two regions of it are generated, so a lint hit there is
-// normally in hand-written prose.
-//
-// The empty-File guard is what keeps an unstamped issue out of the generated
-// branch: on the zero value every one of these fields is "", so without it File
-// would match jsonPath and String would advertise regenerating an artifact it
-// cannot even name.
+// whollyGenerated reports whether every line of the issue's file is generated. The
+// README is excluded: only two of its regions are. The empty-File guard keeps an
+// unstamped issue out, where every field is "" and File would match jsonPath.
 func (i Issue) whollyGenerated() bool {
 	return i.File != "" && (i.File == i.jsonPath || i.File == i.markdownPath)
 }
@@ -154,14 +121,10 @@ type Allowlist struct {
 	reasons map[string]string
 }
 
-// ParseAllowlist reads an allowlist file. Every entry is one token
-// ("--<flag>" or "-<x>") followed by a '#' comment giving the reason; blank lines
-// and whole-line comments are ignored. The reason is mandatory: an entry
-// without one is an error, because an unexplained exception is how a stale
-// reference survives forever.
-//
-// A parse error names the configured [Config.AllowlistPath], so a consumer that
-// moved the file is told where the bad entry actually is.
+// ParseAllowlist reads an allowlist file. Every entry is one token ("--<flag>" or
+// "-<x>") followed by a '#' comment giving the reason; blank lines and whole-line
+// comments are ignored. The reason is mandatory -- an unexplained exception is how a
+// stale reference survives forever. A parse error names [Config.AllowlistPath].
 func (d *Docs) ParseAllowlist(content string) (Allowlist, error) {
 	out := Allowlist{reasons: map[string]string{}}
 	for i, raw := range strings.Split(content, "\n") {
@@ -201,20 +164,13 @@ func (a Allowlist) Entries() []string {
 
 // LintMarkdown checks one markdown document against the surface.
 //
-// Fenced code blocks are parsed as shell: line continuations are joined,
-// pipelines are split, and only segments whose argv[0] is the CLI binary are
-// checked — every flag of every other tool in an example pipeline is ignored,
-// which is what keeps the false-positive rate at zero. Prose outside fences is
-// checked more loosely: only backticked long-flag tokens, and only against the
-// union of every flag in the tree, because prose rarely says which command it
-// means.
-//
-// The argv[0] rule is what buys the zero false-positive rate, and it costs
-// reach: an invocation the binary does not lead — "sudo brutus …", "time brutus
-// …", "FOO=bar brutus …" — is skipped rather than checked. Recognizing prefixes
-// one at a time would trade a guarantee for a list that is never finished, so
-// examples are written with the binary first. There are none of the other shape
-// in this repository.
+// Fenced code blocks are parsed as shell: continuations joined, pipelines split, and
+// only segments whose argv[0] is the CLI binary checked — every other tool's flags
+// are ignored, keeping the false-positive rate at zero. Prose outside fences is
+// checked more loosely: backticked long-flag tokens only, against the union of every
+// flag in the tree, because prose rarely says which command it means. So an
+// invocation the binary does not lead ("sudo brutus …") is skipped — recognizing
+// prefixes one at a time trades a guarantee for a list that is never finished.
 func (d *Docs) LintMarkdown(s Surface, file, content string, allow Allowlist) []Issue {
 	var issues []Issue
 
@@ -270,13 +226,10 @@ func (d *Docs) LintMarkdown(s Surface, file, content string, allow Allowlist) []
 	return issues
 }
 
-// fenceDelimiter returns the fence a line opens a code block with, or "" when the line
-// does not open one.
-//
-// It returns the whole run of backticks or tildes, not just three of them. The length
-// is load-bearing: a block opened with four backticks may contain a three-backtick line
-// as content, and closing on it early would read the rest of the document as prose and
-// the following prose as shell.
+// fenceDelimiter returns the fence a line opens a code block with, or "". It
+// returns the whole run: a block opened with four backticks may contain a
+// three-backtick line as content, and closing early inverts the fence state for the
+// rest of the document.
 func fenceDelimiter(trimmed string) string {
 	for _, marker := range []byte{'`', '~'} {
 		n := 0
@@ -342,31 +295,17 @@ func lintShellLine(s Surface, file string, line int, text string, allow Allowlis
 	return issues
 }
 
-// lintInvocation checks one "brutus ..." invocation.
+// lintInvocation checks one "brutus ..." invocation in the two stages cobra works in:
+// resolve the command, stepping over flags and the values they consume, then validate
+// every flag against the command finally resolved. Cobra parses the whole argv against
+// that command's flag set, so a flag's position relative to the subcommand does not
+// change whether it is accepted; judging each flag against whichever command was
+// resolved when it was read errs both ways.
 //
-// It works in the two stages cobra works in. First it resolves the command,
-// stepping over flags and the values they consume; then it validates every flag
-// in the invocation against the command that was finally resolved. That order is
-// not incidental — cobra dispatches to the resolved command and parses the whole
-// argv against *that* command's flag set, so where a flag sits relative to the
-// subcommand does not change whether it is accepted.
-//
-// Validating each flag against whichever command happened to be resolved when it
-// was read gets this wrong in both directions:
-//
-//   - Reporting a flag against the root because it was written before the
-//     subcommand. `brutus --json enum apollo --domain example.com` is legal, but
-//     --domain would be reported as not existing on "brutus".
-//   - Missing a flag the resolved command refuses. `brutus --timeout 5s logon`
-//     fails at runtime because the logon family rejects the inherited --timeout,
-//     and `brutus --version logon` fails because --version is local to the root
-//     — neither is excused by being written early.
-//
-// Values are stepped over using the command resolved so far, which is what cobra
-// does too: a non-boolean flag takes the next argument, a value-taking shorthand
-// takes the rest of its token ("-oresults.json") or the next argument, and "--"
-// ends flag parsing. Reading a value as a flag would report its characters as
-// nonexistent shorthands.
+// Values are stepped over using the command resolved so far, as cobra does: a
+// non-boolean flag takes the next argument, a value-taking shorthand takes the rest of
+// its token ("-oresults.json") or the next argument, and "--" ends flag parsing.
+// Reading a value as a flag reports its characters as nonexistent shorthands.
 func lintInvocation(s Surface, file string, line int, argv []string, allow Allowlist) []Issue {
 	cmd, ok := s.Command(s.Root())
 	if !ok {
@@ -379,9 +318,8 @@ func lintInvocation(s Surface, file string, line int, argv []string, allow Allow
 	)
 
 	// resolving stays true across flags and goes false at the first positional
-	// that is not a subcommand: from there on argv holds this command's
-	// arguments, and an argument that happens to spell a subcommand name is not
-	// one.
+	// that is not a subcommand: from there argv holds this command's arguments,
+	// and one that happens to spell a subcommand name is not one.
 	resolving := true
 	for i := 1; i < len(argv); i++ {
 		arg := argv[i]
@@ -414,12 +352,10 @@ func lintInvocation(s Surface, file string, line int, argv []string, allow Allow
 				cmd = child
 				break
 			}
-			// Not a subcommand, so from here on argv holds this command's
-			// arguments. That is true whether or not the token is worth
-			// reporting, so resolving stops on every path out of here: were it
-			// left on, a later argument spelling a real subcommand name would
-			// advance cmd and every flag in the line would then be judged
-			// against the wrong command.
+			// Not a subcommand, so from here argv holds this command's
+			// arguments -- true whether or not the token is worth reporting, so
+			// resolving stops on every path out. Left on, a later argument
+			// spelling a real subcommand name would advance cmd.
 			if reportsBogusSubcommand(s, cmd) {
 				issues = append(issues, Issue{
 					File: file, Line: line, Token: arg, Command: cmd.Path,
@@ -442,13 +378,11 @@ func lintInvocation(s Surface, file string, line int, argv []string, allow Allow
 	return issues
 }
 
-// longFlagTakesNext reports whether the argument after a "--<name>" token is
-// that flag's value rather than a token of its own.
-//
-// A "--<name>=<value>" token carries its own value. Otherwise any non-boolean
-// flag takes the next argument. A flag cmd does not declare is guessed from
-// shape — anything that does not itself look like a flag — so that one unknown
-// flag does not also get its value read as a bogus subcommand.
+// longFlagTakesNext reports whether the argument after a "--<name>" token is that
+// flag's value. A "--<name>=<value>" token carries its own; otherwise any
+// non-boolean flag takes the next argument. An undeclared flag is guessed from
+// shape, so one unknown flag does not also get its value read as a bogus
+// subcommand.
 func longFlagTakesNext(cmd *Command, arg, next string) bool {
 	name, _, carriesValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
 	if next == "" || carriesValue || name == "" || name == HelpFlag {
@@ -460,11 +394,10 @@ func longFlagTakesNext(cmd *Command, arg, next string) bool {
 	return !strings.HasPrefix(next, "-")
 }
 
-// shortFlagTakesNext reports whether the argument after a "-x" token, or a
-// "-xyz" cluster, is a value of that cluster. pflag clusters booleans freely,
-// and the first flag that takes a value swallows the rest of the token
-// ("-oresults.json", "-o=results.json") or, when the token ends there, the next
-// argument ("-o results.json").
+// shortFlagTakesNext reports whether the argument after a "-x" token or "-xyz"
+// cluster is a value of that cluster. pflag clusters booleans freely, and the first
+// value-taking flag swallows the rest of the token ("-oresults.json") or, when the
+// token ends there, the next argument.
 func shortFlagTakesNext(cmd *Command, arg, next string) bool {
 	if next == "" {
 		return false
@@ -525,10 +458,9 @@ func checkLongFlag(s Surface, cmd *Command, file string, line int, arg string, a
 	}}
 }
 
-// checkShortFlags validates a "-x" token, or a "-xyz" cluster, against cmd. It
-// reads the cluster the way pflag does (see shortFlagTakesNext): scanning a
-// flag's value as more shorthands is how "-oresults.json" turns into six
-// invented flags.
+// checkShortFlags validates a "-x" token or "-xyz" cluster against cmd, reading the
+// cluster the way pflag does (see shortFlagTakesNext): scanning a flag's value as
+// more shorthands turns "-oresults.json" into six invented flags.
 func checkShortFlags(cmd *Command, file string, line int, arg string, allow Allowlist) []Issue {
 	var issues []Issue
 
@@ -579,69 +511,34 @@ func isShorthandRune(r rune) bool {
 }
 
 // reportsBogusSubcommand reports whether a positional that is not one of cmd's
-// children is worth reporting as a misspelled subcommand.
-//
-// Two conditions must hold. cmd must have children, or there is no subcommand
-// to have misspelled and nothing to suggest. And cmd must not legitimately
-// take a positional itself: when a command both dispatches to children and
-// accepts an argument of its own, a non-child positional is as likely to be
-// that argument as a typo, and reporting it forces correct documentation to be
-// rewritten into something false.
-//
-// Two limitations follow, stated rather than hidden. A genuinely misspelled
-// subcommand of a parent that both runs and sketches an argument is no longer
-// reported: with "github [owner/repo]" runnable, "tool github tagets" is
-// accepted. And a command that really takes a positional but does not sketch
-// it in Use is still reported, because its own declared interface says it
-// takes none. Everything else stays covered, the root included -- see
-// takesPositional for why that mattered enough to shape the predicate.
+// children is worth reporting as a misspelled subcommand. cmd must have children, or
+// nothing was misspelled, and must not take a positional itself -- for a command that
+// both dispatches and accepts an argument, a non-child positional is as likely to be
+// that argument as a typo. Two limitations follow: a real typo under a parent that
+// both runs and sketches an argument goes unreported, and a command taking a
+// positional it does not sketch in Use is still reported.
 func reportsBogusSubcommand(s Surface, cmd *Command) bool {
 	return len(s.Children(cmd.Path)) > 0 && !takesPositional(cmd)
 }
 
-// takesPositional reports whether cmd's own declared interface says it accepts
-// a positional argument.
-//
-// The surface does not carry cobra's Args validator, which is the authoritative
-// answer, and adding it would change the JSON schema and invalidate every
-// consumer's committed docs/cli-surface.json golden. So this reads the two
-// signals the surface already has, and needs both.
-//
-// Runnable alone is not enough, and that is measured rather than assumed: a
-// root command with a RunE and subcommands is the overwhelmingly common cobra
-// shape, so treating "runnable" as "takes an argument" would suppress mistyped
-// subcommand reports at the top level of nearly every CLI -- precisely where a
-// typo in documentation is most likely and where nearestCommand pays off most.
-//
-// The second signal is the Use string, which is cobra's own user-facing
-// argument sketch: "github [owner/repo]" documents a positional, "version"
-// documents none. The recognized shapes are enumerated in hasArgSketch below.
+// takesPositional reports whether cmd's own declared interface says it accepts a
+// positional. The surface does not carry cobra's Args validator -- the authoritative
+// answer -- because adding it would change the JSON schema and invalidate every
+// consumer's golden, so this needs both signals the surface has. Runnable alone is not
+// enough: a root with a RunE and subcommands is the common cobra shape, and treating
+// it as "takes an argument" would suppress mistyped subcommand reports at the top
+// level of nearly every CLI. The second signal is the Use string -- see hasArgSketch.
 func takesPositional(cmd *Command) bool {
 	return cmd.Runnable && hasArgSketch(cmd.Use)
 }
 
-// hasArgSketch reports whether a cobra Use string sketches a positional
-// argument after the command name.
-//
-// The recognized shapes, exhaustively: the first field is the command's own
-// name and is dropped; a field beginning with "-" is a flag, not a positional;
-// a field in usePlaceholders describes the invocation's shape rather than an
-// argument ("[flags]", and the four spellings of "a subcommand goes here") and
-// is not a positional; every other non-empty field is an argument sketch,
-// whatever its punctuation, so "[owner/repo]", "<domain>", "TARGET" and a bare
-// "path" all count.
-//
-// Nothing here can panic or mis-slice: strings.Fields tolerates any spacing and
-// returns an empty slice for an empty or all-space Use, which yields false.
-// False is also the deliberate default for a Use string this does not
-// understand, because false means the linter keeps reporting. That is the safe
-// direction for an unrecognized shape: an under-documented Use is itself a
-// documentation defect -- cobra prints Use verbatim in help output, so a
-// command whose sketch omits an argument it really takes is already lying to
-// its users -- and both ways of clearing the resulting report (correct the
-// prose, or document the argument in Use) leave the CLI's documentation more
-// honest than it was. Silence, by contrast, cannot be recovered from: it hides
-// a real typo with nothing to signal that it did.
+// hasArgSketch reports whether a cobra Use string sketches a positional argument after
+// the command name. The recognized shapes, exhaustively: the first field is the
+// command's own name and is dropped; a field beginning with "-" is a flag; a field in
+// usePlaceholders describes the invocation's shape; every other non-empty field is an
+// argument sketch whatever its punctuation, so "[owner/repo]", "<domain>", "TARGET" and
+// a bare "path" all count. False is the deliberate default for a Use string this does
+// not understand, because false means the linter keeps reporting.
 func hasArgSketch(use string) bool {
 	fields := strings.Fields(use)
 	if len(fields) < 2 {
@@ -687,13 +584,9 @@ func usableFlagNames(cmd *Command) []string {
 	return out
 }
 
-// lintGoComments checks every long-flag token in the comments of one Go file.
-// This is the check that keeps a renamed flag from surviving in a comment that
-// no compiler and no test would ever read.
-//
-// It is unexported because linting a repository is the supported entry point: a
-// consumer names the directories to walk in [Config] rather than reading and
-// passing files itself.
+// lintGoComments checks every long-flag token in one Go file's comments, so a
+// renamed flag cannot survive where no compiler and no test reads. Unexported
+// because linting a repository is the supported entry point.
 func (d *Docs) lintGoComments(s Surface, file string, src []byte, allow Allowlist) ([]Issue, error) {
 	fset := token.NewFileSet()
 	parsed, err := parser.ParseFile(fset, file, src, parser.ParseComments|parser.SkipObjectResolution)
@@ -727,15 +620,10 @@ func (d *Docs) lintGoComments(s Surface, file string, src []byte, allow Allowlis
 	return issues, nil
 }
 
-// LintScope records what a lint run actually reached: the markdown documents it
-// read, the directories it walked for Go files, the Go files it found under
-// them, the entries it declined to read, and the allowlist that was in force.
-//
-// It exists so [LintReport] can state its own coverage. A scope that matched
-// nothing is the failure mode this type is for: a walk root that is missing, or
-// is a symlink, lints zero files, and a report saying only that there were no
-// issues is indistinguishable from a clean repository. Reporting the counts
-// turns that silence into a visible zero.
+// LintScope records what a lint run actually reached, so [LintReport] can state its own
+// coverage. A scope that matched nothing is the failure mode it exists for: a missing or
+// symlinked walk root lints zero files, and "no issues" alone is indistinguishable from
+// a clean repository.
 type LintScope struct {
 	// MarkdownFiles are the repo-relative markdown documents that were linted.
 	MarkdownFiles []string
@@ -744,31 +632,21 @@ type LintScope struct {
 	// GoFiles are the repo-relative Go files found under GoDirs and linted.
 	GoFiles []string
 	// SkippedIrregular are the repo-relative entries the run declined to read
-	// because they are not regular files -- a symlink, a device, a FIFO, a
-	// socket -- along with any configured Go directory that exists but is not a
-	// directory. Reading such an entry whole is either unbounded or
-	// never-returning, and following one leaves the repository altogether, so
-	// what is read is selected by the entry's type rather than by its name.
-	//
-	// An entry lands here whether a walk matched it by name or
-	// [Config.LintedMarkdown] named it outright: the two feed the same read and
-	// carry the same hazard, and a configured path is trusted as a value, not as
-	// whatever it resolves to on disk. They are listed rather than dropped for
-	// the reason the rest of this type exists: an unexplained gap in coverage
-	// reads as a clean repository.
+	// because they are not regular files -- a symlink, device, FIFO or socket --
+	// plus any configured Go directory that is not a directory. Reading such an
+	// entry whole is unbounded or never-returning, and following one leaves the
+	// repository. Entries are listed rather than dropped: an unexplained gap
+	// reads as a clean repo.
 	SkippedIrregular []string
 	// Allowlist is the allowlist the run suppressed tokens with.
 	Allowlist Allowlist
 }
 
-// LintReport renders lint issues as a failure message that ends with the scope
-// the run actually covered.
-//
-// The scope line is appended rather than woven in, so a caller matching on the
-// issue lines is unaffected by it. It reports the allowlist size beside the file
-// counts because a suppressed token is invisible in the issue list by
-// construction: a reader who cannot see that forty tokens are allowlisted
-// cannot tell a clean repository from a silenced one.
+// LintReport renders lint issues as a failure message ending with the scope the run
+// covered. The scope line is appended rather than woven in, so a caller matching on
+// issue lines is unaffected. It reports the allowlist size too: a suppressed token is
+// invisible in the issue list, so a reader could not otherwise tell a clean repository
+// from a silenced one.
 func LintReport(issues []Issue, scope LintScope) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "documentation references %d CLI flag(s) or subcommand(s) that do not exist:\n\n", len(issues))
@@ -807,10 +685,10 @@ func shellSegments(line string) [][]string {
 		argv     []string
 		cur      strings.Builder
 		quote    rune
-		// quoted records that the current token came from an explicit "" or '', so an
-		// empty argument is still an argument. Dropping it shifts everything after it:
-		// given `--<flag> "" --<next>`, the empty value disappears, --<next> is read as
-		// the value of --<flag>, and an invalid --<next> goes unreported.
+		// quoted records that the token came from an explicit "" or '', so an
+		// empty argument is still an argument. Dropping it shifts everything
+		// after: in `--<flag> "" --<next>`, --<next> becomes the value of
+		// --<flag> and an invalid --<next> goes unreported.
 		quoted bool
 	)
 

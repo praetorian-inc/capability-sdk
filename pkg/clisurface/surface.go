@@ -16,24 +16,17 @@ import (
 // shape of the rendered JSON changes in a way consumers must notice.
 const schemaVersion = 1
 
-// The commands cobra injects into a tree on the first Execute
-// (InitDefaultHelpCmd / InitDefaultCompletionCmd / initCompleteCmd) are not part
-// of the surface this package documents, and whether they are present depends on
-// whether something already executed the tree in this process — so excluding
-// them keeps the walk deterministic regardless of test ordering.
-//
-// These are the names cobra gives them. A name is where the recognition starts,
-// never where it ends: see cobraInjected.
+// The names cobra gives the commands it injects on the first Execute. Excluding
+// them keeps the walk deterministic regardless of test ordering. A name is where
+// recognition starts, never where it ends: see cobraInjected.
 const (
 	helpCommandName       = "help"
 	completionCommandName = "completion"
 )
 
-// The Use and Short lines cobra gives the two injected commands a consumer could
-// plausibly also want to declare. Recognition compares against them verbatim, so
-// they are cobra's strings and not this package's wording; if a cobra release
-// changes either one, recognition fails and the command is documented rather
-// than dropped, which is the direction this package wants to fail in.
+// cobra's own Use and Short lines for the two injected commands a consumer could
+// also declare. Recognition compares verbatim, so a cobra release that changes
+// either one documents the command rather than dropping it.
 const (
 	cobraHelpUse         = helpCommandName + " [command]"
 	cobraHelpShort       = "Help about any command"
@@ -41,11 +34,9 @@ const (
 	cobraCompletionShort = "Generate the autocompletion script for the specified shell"
 )
 
-// HelpFlag is the flag cobra injects into every command on the first Execute
-// (InitDefaultHelpFlag). Like the built-in commands it is excluded from the
-// surface — whether it is registered yet depends on whether something already
-// executed the tree in this process — and the doc linter accepts it everywhere
-// instead (see vocabulary).
+// HelpFlag is the flag cobra injects on the first Execute. Excluded from the
+// surface because whether it is registered depends on execution order; the doc
+// linter accepts it everywhere instead (see vocabulary).
 const HelpFlag = "help"
 
 // Surface is the complete CLI surface of a command tree. Commands are sorted by
@@ -96,11 +87,10 @@ type Flag struct {
 	// Hidden reports whether the flag is omitted from help output.
 	Hidden bool `json:"hidden,omitempty"`
 	// Rejected reports whether the command hard-errors when the flag is set,
-	// even though the flag is reachable from the command's flag set. The
-	// motivating case is a command family that inherits a root-persistent
-	// --timeout but refuses it in favor of its own --scan-timeout. A flag that
-	// is rejected is not usable on the command: the generated reference must not
-	// present it as an option and the doc linter must reject examples using it.
+	// though it is reachable from the command's flag set -- a family inheriting a
+	// root-persistent --timeout but refusing it for its own --scan-timeout. Such a
+	// flag is not usable: the reference must not present it and the doc linter
+	// must reject examples using it.
 	Rejected bool `json:"rejected,omitempty"`
 	// RejectedReason is the error the command returns when the flag is set.
 	RejectedReason string `json:"rejectedReason,omitempty"`
@@ -108,50 +98,24 @@ type Flag struct {
 
 // Walk derives the surface of the tree rooted at root.
 //
-// Inherited flags are recorded per command, because inheritance alone does not
-// make a flag usable: a command's PreRunE may reject a flag it inherits. Walk
-// discovers those rejections by probing PreRunE (see probeRejections) rather
-// than from a hand-maintained table, so removing the guard in the command
-// changes the surface and reddens the gate.
+// Inherited flags are recorded per command, because inheritance alone does not make a
+// flag usable: a command's PreRunE may reject one. Walk discovers those by probing
+// PreRunE (see probeRejections), so removing a guard changes the surface and reddens
+// the gate. Only PreRunE is probed -- PersistentPreRunE and RunE are invisible.
 //
-// Walk does not mutate the observable tree. That is a hard requirement, not a
-// nicety: a cobra tree is usually a package-level variable shared by every test
-// in a binary, so any mutation leaks into whatever runs next. In particular Walk
-// never calls cobra's LocalFlags or InheritedFlags accessors — both call
-// mergePersistentFlags, which permanently folds every ancestor's persistent
-// flags into the command's own FlagSet — and it never flips a Changed bit on a
-// real flag (see resolveFlags and probeRejections).
+// Walk does not mutate the observable tree, which matters because a cobra tree is
+// usually a package-level variable shared by every test in a binary. It never calls
+// LocalFlags or InheritedFlags (both call mergePersistentFlags, permanently folding
+// ancestors' persistent flags into the command's own FlagSet) and never flips a Changed
+// bit on a real flag. The one unavoidable write is cmd.Commands() sorting the child
+// slice in place -- idempotent, and unobservable since every route to that unexported
+// slice calls Commands() first.
 //
-// One cobra-internal write is unavoidable and harmless: cmd.Commands() sorts a
-// command's child slice in place when cobra.EnableCommandSorting is set (the
-// default), which is the only way to enumerate children. It is the same sort
-// cobra performs itself before printing help, it is idempotent, and the slice is
-// unexported — every route to it calls Commands() and therefore sorts first — so
-// no caller can observe the difference. Toggling the package-level
-// EnableCommandSorting to avoid it would be a data race with any parallel test.
-//
-// Only PreRunE is probed. A guard implemented in PersistentPreRunE or in RunE
-// is not visible to Walk.
-//
-// Probing runs the consumer's own PreRunE implementations, once per reachable
-// flag per command, so they must be side-effect-free and cheap: a guard that
-// talks to the network, writes a file, or prompts makes walking the tree do the
-// same. For the same reason a walk must not run concurrently with other use of
-// the same command tree -- Walk leaves the observable tree unchanged, but the
-// guards it invokes are consumer code running against a live tree another
-// goroutine may be executing.
-//
-// Three further obligations are on the guard, because Walk cannot enforce any
-// of them. A probed guard must return: one that blocks -- on a lock, a read, a
-// network call -- wedges Walk with no context, no deadline and nothing to
-// cancel. It must not call os.Exit: the calling process dies mid-walk with the
-// guard's own status, which in a drift gate reads as an unexplained failure of
-// the gate. And it must not call runtime.Goexit, which unwinds past the probe
-// and out of the caller's goroutine. The deferred recover around a probe covers
-// a panic and nothing else; none of these three is one. A timeout here would
-// not help either: it needs a goroutine per probe and still cannot reclaim one
-// that has wedged, so the obligation stays where it can actually be met, with
-// the guard.
+// Probing runs the consumer's PreRunE once per reachable flag per command, so guards
+// must be side-effect-free, cheap, and must not run concurrently with other use of the
+// tree. Three obligations Walk cannot enforce: a guard must return (a blocking one
+// wedges Walk with nothing to cancel), must not call os.Exit, and must not call
+// runtime.Goexit. The deferred recover covers a panic and none of those three.
 func Walk(root *cobra.Command) Surface {
 	var s Surface
 	collect(root, root, &s)
@@ -159,11 +123,9 @@ func Walk(root *cobra.Command) Surface {
 	return s
 }
 
-// collect appends cmd and its descendants to s, skipping the commands cobra
-// injects into the tree itself as direct children of root. cobra only ever
-// injects them there, and collect only skips them there: filtering at every
-// depth would drop a legitimate subcommand called "help" along with its own
-// children.
+// collect appends cmd and its descendants to s, skipping the commands cobra injects
+// as direct children of root. cobra only injects them there, and filtering at every
+// depth would drop a legitimate subcommand called "help" and its children.
 func collect(cmd, root *cobra.Command, s *Surface) {
 	if cmd.Parent() == root && cobraInjected(cmd) {
 		return
@@ -177,55 +139,35 @@ func collect(cmd, root *cobra.Command, s *Surface) {
 	}
 }
 
-// cobraInjected reports whether cmd is a command cobra added to the tree itself
-// rather than one the consumer declared.
-//
-// Provenance decides, not the name. A drift gate calls Walk without executing
-// the tree, and cobra injects during Execute — so at Walk time a root-level
-// "help" or "completion" is usually the consumer's own command, and a name-only
-// test excluded exactly the commands this package exists to document while
-// missing the injected ones it was written to drop.
-//
-// Every branch defaults to including the command, because the two errors are not
-// symmetric. Documenting a command cobra injected is visible in the artifact
-// diff and harmless. Silently dropping one the consumer declared is invisible:
-// the command vanishes from the JSON artifact, from the generated reference and
-// from lint resolution, so the gate quietly stops covering a real command and
-// its flags become unrecognised vocabulary.
+// cobraInjected reports whether cobra added cmd rather than the consumer declaring it.
+// Provenance decides, not the name: a drift gate calls Walk without executing, so at
+// Walk time a root-level "help" or "completion" is usually the consumer's own. Every
+// branch defaults to including the command -- documenting an injected command shows up
+// in the artifact diff, while silently dropping a declared one is invisible.
 func cobraInjected(cmd *cobra.Command) bool {
 	switch cmd.Name() {
 	case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
-		// cobra's completion wire protocol. Unlike the two below, these names
-		// are not something a consumer reaches for: cobra exports them as
-		// constants so they are never spelled by hand, they carry no
-		// documentation (initCompleteCmd marks its command Hidden), and cobra
-		// adds its own on every Execute whatever the tree already holds, so a
-		// command under either name cannot displace the protocol's. The name is
-		// the whole test here.
+		// cobra's completion wire protocol. Unlike the two below, a consumer
+		// never reaches for these names: cobra exports them as constants, they
+		// carry no documentation, and cobra adds its own on every Execute
+		// whatever the tree holds. The name is the whole test here.
 		return true
 	case helpCommandName:
 		return cmd.Use == cobraHelpUse && cmd.Short == cobraHelpShort && occupiesCobrasHelpSlot(cmd)
 	case completionCommandName:
-		// cobra's completion command groups the per-shell generators and runs
-		// nothing itself, and InitDefaultCompletionCmd skips injection entirely
-		// when the tree already declares a "completion" command — so a match
-		// here cannot be shadowing a consumer's own.
+		// InitDefaultCompletionCmd skips injection entirely when the tree already
+		// declares a "completion" command, so a match here cannot be shadowing a
+		// consumer's own.
 		return cmd.Use == cobraCompletionUse && cmd.Short == cobraCompletionShort && !cmd.Runnable()
 	}
 	return false
 }
 
-// occupiesCobrasHelpSlot reports whether cmd is the command cobra runs for
-// "help", which is to say whether its parent's unexported helpCommand field
-// points at cmd.
-//
-// cobra exposes no getter for that field, but IsAvailableCommand consults it:
-// for a runnable, visible, undeprecated command every other branch of that
-// method returns true, so a false answer means the parent's helpCommand is this
-// command. Reading it this way keeps Walk's no-mutation guarantee — calling
-// InitDefaultHelpCmd to find out would inject the very command being identified.
-//
-// cmd must have a parent; collect only tests root's children.
+// occupiesCobrasHelpSlot reports whether the parent's unexported helpCommand field
+// points at cmd. cobra exposes no getter, but IsAvailableCommand consults it: for a
+// runnable, visible, undeprecated command every other branch returns true, so a false
+// answer means this is the help slot. Calling InitDefaultHelpCmd would inject the very
+// command being identified. cmd must have a parent.
 func occupiesCobrasHelpSlot(cmd *cobra.Command) bool {
 	return cmd.Runnable() && !cmd.Hidden && cmd.Deprecated == "" && !cmd.IsAvailableCommand()
 }
@@ -277,20 +219,12 @@ type resolvedFlag struct {
 	inherited bool
 }
 
-// resolveFlags returns every flag usable on cmd — the flags it declares itself,
-// its own persistent flags, and its ancestors' persistent flags — sorted by
-// name.
-//
-// It reads only cobra's non-mutating accessors (Flags, PersistentFlags, Parent), so it
-// leaves the tree exactly as it found it.
-//
-// Inheritance is classified by flag identity rather than by name, which is both correct
-// and merge-independent. A command that shadows an ancestor's persistent flag with a
-// local one of the same name holds a different *pflag.Flag, so it is reported as its
-// own — classifying by name marked it inherited while reporting its local default,
-// which is a surface that contradicts itself. And a genuinely inherited flag is the
-// ancestor's own pointer whether or not cobra has already merged the tree into
-// cmd.Flags().
+// resolveFlags returns every flag usable on cmd -- its own, its persistent ones,
+// and its ancestors' persistent ones -- sorted by name, reading only cobra's
+// non-mutating accessors. Inheritance is classified by flag identity, not name: a
+// command shadowing an ancestor's persistent flag holds a different *pflag.Flag and
+// is reported as its own, while an inherited flag is the ancestor's pointer whether
+// or not cobra has merged the tree.
 func resolveFlags(cmd *cobra.Command) []resolvedFlag {
 	inherited := map[*pflag.Flag]bool{}
 	for parent := cmd.Parent(); parent != nil; parent = parent.Parent() {
@@ -317,32 +251,16 @@ func resolveFlags(cmd *cobra.Command) []resolvedFlag {
 	return out
 }
 
-// probeRejections reports which of the resolved flags cmd's PreRunE refuses,
-// keyed by flag name with the error text as the value.
+// probeRejections reports which resolved flags cmd's PreRunE refuses, keyed by flag name
+// with the error text as the value.
 //
-// The probe runs PreRunE against a shadow command holding copies of the flags,
-// one copy marked as set at a time. A guard reads the command it is handed
-// (cobra passes the command being executed), so the shadow is what it inspects
-// — and because the Changed bits being flipped belong to copies, the real tree
-// is never written to at all. Two guards keep the result trustworthy:
-//
-//   - Every copy starts with Changed cleared, so a flag another test left
-//     marked as set cannot make the baseline fail and silently drop the probe.
-//   - The baseline (no flag set) must pass. A PreRunE that fails
-//     unconditionally tells us nothing about individual flags, so nothing is
-//     reported.
-//
-// The copies are shallow, so a copy shares the real flag's pflag.Value pointer.
-// Only Changed is written, which lives in the copy — but a future guard that
-// called Set on a flag would write through to the live tree. A guard that reads
-// its inputs is the contract here; see the recover below for the other half.
-//
-// Probing calls PreRunE outside cobra's execution lifecycle, so a guard that
-// assumed cobra had already validated Args and dereferenced args[0] would panic
-// and take the whole gate down. That is recovered rather than propagated: an
-// unprobeable command yields no rejections, which is the same conservative
-// answer as a command with no PreRunE at all, and the deterministic half of the
-// gate still covers it.
+// It runs PreRunE against a shadow command holding copies of the flags, one marked as
+// set at a time, so the real tree is never written to. Two guards keep the result
+// trustworthy: every copy starts with Changed cleared, and the baseline (no flag set)
+// must pass -- a PreRunE that fails unconditionally says nothing about individual flags.
+// Probing runs outside cobra's execution lifecycle, so a guard assuming Args were
+// validated would panic; that is recovered, not propagated -- an unprobeable command
+// yields no rejections, the same conservative answer as one with no PreRunE.
 func probeRejections(cmd *cobra.Command, resolved []resolvedFlag) (rejections map[string]string) {
 	if cmd.PreRunE == nil {
 		return nil
@@ -366,10 +284,9 @@ func probeRejections(cmd *cobra.Command, resolved []resolvedFlag) (rejections ma
 		// write straight through to the live tree. frozenValue makes that a no-op
 		// while still reporting the real value to anything that reads it.
 		duplicate.Value = frozenValue{duplicate.Value}
-		// Drop the shorthand. The probe only needs the flag reachable by name, and a
-		// command declaring a local flag whose shorthand matches an inherited one
-		// would otherwise make pflag panic on the duplicate -- silently aborting the
-		// probe via the recover above, and only when the tree had not been merged yet.
+		// Drop the shorthand: the probe only needs the flag reachable by name, and a
+		// local flag whose shorthand matches an inherited one makes pflag panic on
+		// the duplicate -- silently aborting the probe via the recover above.
 		duplicate.Shorthand = ""
 		copies = append(copies, &duplicate)
 		shadow.Flags().AddFlag(&duplicate)
@@ -406,22 +323,11 @@ type frozenValue struct {
 func (frozenValue) Set(string) error { return nil }
 
 // Hash is a stable fingerprint of the structural surface: command paths, names,
-// aliases, visibility, and each flag's name, shorthand, type, default and
-// usability. It covers that structure rather than the rendered artifact bytes,
-// and descriptive prose (Short, Usage, Example) is deliberately excluded so
-// that rewording help text does not move a hash downstream consumers pin.
-//
-// It detects drift, not tampering. There is no signature and no secret:
-// anything that can edit the artifacts can recompute the hash, and a
-// regeneration run recomputes it as a matter of course. A hash that matches
-// therefore means "the structural surface is unchanged since you took this
-// pin" -- never "these artifacts are trustworthy".
-//
-// It is not an artifact identity either. Because prose is excluded, two
-// different generated artifacts -- same commands and flags, every description
-// rewritten -- share one hash, so it must never be used as a cache key or an
-// ETag for the generated files. Checking the artifacts themselves is the
-// mechanism that covers prose.
+// aliases, visibility, and each flag's name, shorthand, type, default and usability.
+// Prose (Short, Usage, Example) is excluded so rewording help text does not move a hash
+// downstream consumers pin. It detects drift, not tampering -- there is no signature --
+// and is not an artifact identity: two artifacts differing only in prose share one hash,
+// so never use it as a cache key or ETag.
 func (s Surface) Hash() string {
 	lines := make([]string, 0, len(s.Commands)*4)
 	for i := range s.Commands {
