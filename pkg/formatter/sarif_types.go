@@ -26,10 +26,10 @@ type SARIFTool struct {
 
 // SARIFDriver describes the primary analysis tool
 type SARIFDriver struct {
-	Name           string       `json:"name"`
-	Version        string       `json:"version,omitempty"`
-	InformationURI string       `json:"informationUri,omitempty"`
-	Rules          []SARIFRule  `json:"rules,omitempty"`
+	Name           string      `json:"name"`
+	Version        string      `json:"version,omitempty"`
+	InformationURI string      `json:"informationUri,omitempty"`
+	Rules          []SARIFRule `json:"rules,omitempty"`
 }
 
 // SARIFRule describes a detection rule

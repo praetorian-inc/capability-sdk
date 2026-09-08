@@ -92,8 +92,8 @@ func TestJSONFormatter_BufferedInterface(t *testing.T) {
 
 	assert.Equal(t, 0, bf.Len())
 
-	f.Format(context.Background(), formatter.Finding{ID: "1"})
-	f.Format(context.Background(), formatter.Finding{ID: "2"})
+	require.NoError(t, f.Format(context.Background(), formatter.Finding{ID: "1"}))
+	require.NoError(t, f.Format(context.Background(), formatter.Finding{ID: "2"}))
 	assert.Equal(t, 2, bf.Len())
 
 	bf.Reset()
