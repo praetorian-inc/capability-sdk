@@ -58,7 +58,7 @@ func writeCommand(b *strings.Builder, c *Command) {
 		writeLines(b, escapeAngles(c.Short), "")
 	}
 
-	writeLines(b, "- Usage: "+code(usage(c)))
+	writeUsage(b, c)
 	writeLines(b, "- Aliases: "+aliasCell(c))
 	if c.Hidden {
 		writeLines(b, "- Hidden: not shown in `--help` output")
@@ -123,9 +123,18 @@ func (d *Docs) renderRegions(s Surface) []region {
 // renderSubcommandRegion renders the Quick Start subcommand listing: the visible
 // top-level commands with their cobra Short descriptions. It states no count -- the
 // list is the count, and a written one is a second thing that can go stale.
+//
+// Rows are collected before anything is written, so a CLI with no visible
+// subcommands is not handed a lead-in promising them over an empty fence. There
+// both are omitted and the region is empty: the alias region's pointer to the
+// full reference already covers a leaf command, and an empty splice keeps the
+// required markers without shipping a broken-looking bash block.
 func renderSubcommandRegion(s Surface) string {
 	root := s.Root()
 	children := visible(s.Children(root))
+	if len(children) == 0 {
+		return ""
+	}
 
 	width := 0
 	for _, c := range children {
@@ -251,6 +260,22 @@ func usage(c *Command) string {
 		return c.Path + c.Use[i:]
 	}
 	return c.Path
+}
+
+// writeUsage renders the invocation sketch. A single-line Use stays an inline
+// code span; a multiline one is a fenced block, because a code span collapses
+// the embedded line breaks and the rest of the value becomes one long fragment.
+func writeUsage(b *strings.Builder, c *Command) {
+	u := usage(c)
+	if !strings.Contains(u, "\n") {
+		writeLines(b, "- Usage: "+code(u))
+		return
+	}
+	body := strings.TrimRight(u, "\n")
+	f := fence(body)
+	writeLines(b, "- Usage:", "", f)
+	writeLines(b, strings.Split(body, "\n")...)
+	writeLines(b, f)
 }
 
 // indexDescription is the command-index description, annotated for commands
