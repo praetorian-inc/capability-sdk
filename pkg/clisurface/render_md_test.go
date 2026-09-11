@@ -279,6 +279,39 @@ func TestRenderRegionsSkipsHiddenSubcommands(t *testing.T) {
 	assert.NotContains(t, body, "secret", "hidden commands stay out of the Quick Start listing")
 }
 
+// TestRenderRegionsSubcommandListingDropsItsLeadInWhenThereAreNoVisibleChildren
+// is what the unconditional lead-in got wrong: a leaf CLI with no subcommands
+// was handed "Tool organizes its functionality into these focused subcommands:"
+// above an empty bash fence. The lead-in and fence now go together; an empty
+// region is the honest form, because the alias region's pointer already names
+// the full reference.
+func TestRenderRegionsSubcommandListingDropsItsLeadInWhenThereAreNoVisibleChildren(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{
+		{Path: "tool", Use: "tool", Short: "a single command", Runnable: true},
+	}}
+
+	body := d.renderRegions(s)[0].Body
+
+	assert.Empty(t, body, "a leaf command has no subcommand listing to lead into")
+	assert.NotContains(t, body, "organizes its functionality")
+	assert.NotContains(t, body, "```")
+}
+
+func TestRenderRegionsSubcommandListingHidesTheListingWhenOnlyHiddenCommandsExist(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{
+		{Path: "tool", Use: "tool"},
+		{Path: "tool secret", Use: "secret", Short: "hidden", Hidden: true},
+	}}
+
+	body := d.renderRegions(s)[0].Body
+
+	assert.Empty(t, body)
+	assert.NotContains(t, body, "secret")
+	assert.NotContains(t, body, "organizes its functionality")
+}
+
 func TestUsageIncludesTheArgumentSketch(t *testing.T) {
 	assert.Equal(t, "tool scan [flags]", usage(&Command{Path: "tool scan", Use: "scan [flags]"}))
 	assert.Equal(t, "tool scan", usage(&Command{Path: "tool scan", Use: "scan"}))
@@ -378,6 +411,8 @@ func TestSubcommandRegionLeadsWithTheUpcasedRootName(t *testing.T) {
 		assert.Equal(t, "", titleFirst(""), "titleFirst on an empty root is empty, not a replacement rune")
 		assert.NotPanics(t, func() { d.renderRegions(Surface{}) },
 			"an empty surface renders an empty listing rather than panicking")
+		assert.Empty(t, d.renderRegions(Surface{})[0].Body,
+			"no children means no lead-in and no fence, not a listing of nothing")
 	})
 }
 
@@ -506,6 +541,21 @@ func TestRenderMarkdownLeavesCodeSpansAndFencesUnescaped(t *testing.T) {
 	assert.Contains(t, region, "tool scan # scan a <domain> for issues",
 		"the subcommand region writes Short inside a bash fence, so it stays raw there")
 	assert.NotContains(t, region, "&lt;", "nothing in the region is escaped")
+}
+
+func TestRenderMarkdownFencesMultilineUsage(t *testing.T) {
+	d := newTestDocs(t)
+	s := Surface{Commands: []Command{{
+		Path: "tool", Use: "tool [flags]\nTARGET SPECIFICATION:\n\thost:port",
+		Short: "the tool", Runnable: true,
+	}}}
+
+	section := section(t, string(d.renderMarkdown(s)), "tool")
+
+	assert.Contains(t, section, "- Usage:\n\n```\ntool [flags]\nTARGET SPECIFICATION:\n\thost:port\n```\n",
+		"a multiline Use is a fenced block so the line breaks survive")
+	assert.NotContains(t, section, "- Usage: `tool [flags]",
+		"an inline span would collapse the embedded newlines")
 }
 
 // TestEscapeAnglesLeavesTheAmpersandAlone pins a deliberate decision. "<" and ">"
