@@ -265,6 +265,41 @@ func TestRenderRegionsAliasTableFollowsAliasTransitions(t *testing.T) {
 	})
 }
 
+// TestRenderRegionsSubcommandListingDropsItsLeadInWhenThereAreNoChildren is
+// what the unconditional lead-in got wrong: a leaf CLI was handed "Tool
+// organizes its functionality into these focused subcommands:" above an empty
+// bash fence. The lead-in and fence now go together; the region is empty,
+// because the alias region's pointer to the full reference already covers a
+// command with no children.
+func TestRenderRegionsSubcommandListingDropsItsLeadInWhenThereAreNoChildren(t *testing.T) {
+	d := newTestDocs(t)
+
+	t.Run("a root-only surface", func(t *testing.T) {
+		s := Surface{Commands: []Command{
+			{Path: "tool", Use: "tool [flags]", Short: "the tool", Runnable: true},
+		}}
+
+		body := d.renderRegions(s)[0].Body
+
+		assert.Empty(t, body, "with no children to list, the region is empty rather than a lead-in over an empty fence")
+		assert.NotContains(t, body, "focused subcommands")
+		assert.NotContains(t, body, "```")
+	})
+
+	t.Run("only hidden children", func(t *testing.T) {
+		s := Surface{Commands: []Command{
+			{Path: "tool", Use: "tool"},
+			{Path: "tool secret", Use: "secret", Short: "hidden", Hidden: true},
+		}}
+
+		body := d.renderRegions(s)[0].Body
+
+		assert.Empty(t, body, "hidden children do not count: the row count decides, not the child count")
+		assert.NotContains(t, body, "secret")
+		assert.NotContains(t, body, "focused subcommands")
+	})
+}
+
 func TestRenderRegionsSkipsHiddenSubcommands(t *testing.T) {
 	d := newTestDocs(t)
 	s := Surface{Commands: []Command{
@@ -378,6 +413,8 @@ func TestSubcommandRegionLeadsWithTheUpcasedRootName(t *testing.T) {
 		assert.Equal(t, "", titleFirst(""), "titleFirst on an empty root is empty, not a replacement rune")
 		assert.NotPanics(t, func() { d.renderRegions(Surface{}) },
 			"an empty surface renders an empty listing rather than panicking")
+		assert.Empty(t, d.renderRegions(Surface{})[0].Body,
+			"no children means no lead-in, matching a leaf CLI")
 	})
 }
 

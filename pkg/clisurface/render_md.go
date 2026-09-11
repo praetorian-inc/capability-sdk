@@ -123,9 +123,17 @@ func (d *Docs) renderRegions(s Surface) []region {
 // renderSubcommandRegion renders the Quick Start subcommand listing: the visible
 // top-level commands with their cobra Short descriptions. It states no count -- the
 // list is the count, and a written one is a second thing that can go stale.
+//
+// Rows are collected before anything is written, so a CLI with no visible
+// subcommands is not handed a lead-in promising them over an empty fence. Both
+// are omitted and the region is empty: the alias region's pointer to the full
+// reference already covers a leaf command, and a second pointer would duplicate it.
 func renderSubcommandRegion(s Surface) string {
 	root := s.Root()
 	children := visible(s.Children(root))
+	if len(children) == 0 {
+		return ""
+	}
 
 	width := 0
 	for _, c := range children {
