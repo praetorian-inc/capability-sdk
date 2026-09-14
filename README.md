@@ -199,3 +199,9 @@ committed files, prose or Go comments no longer match the CLI. See
 ## Modules Using This SDK
 
 - `diocletian` - Cloud security scanner
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
+
+The license is stated once, at the repo root. Do not add per-file copyright or license headers — including when porting code from a sibling that carries them. A root `LICENSE` is the authoritative statement; repeating it on every file is not required.
