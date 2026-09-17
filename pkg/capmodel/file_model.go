@@ -3,6 +3,6 @@
 package capmodel
 
 type File struct {
-	Name  string `json:"name"`
-	Bytes []byte `json:"bytes"`
+	Name  string     `json:"name"`
+	Bytes SmartBytes `json:"bytes"`
 }
