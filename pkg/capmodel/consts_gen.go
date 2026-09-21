@@ -2,7 +2,7 @@
 
 package capmodel
 
-// SpecFormat constants are the allowed values for WebApplicationDetails.SpecFormat.
+// SpecFormat constants are the allowed values for WebApplication.SpecFormat.
 const (
 	SpecFormatOpenAPI = "openapi"
 	SpecFormatGraphQL = "graphql"
