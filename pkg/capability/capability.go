@@ -1,7 +1,6 @@
 package capability
 
 import (
-	"context"
 	"strconv"
 	"time"
 )
@@ -19,16 +18,6 @@ type ExecutionContext struct {
 	// Parameters holds the capability's declared parameters with their
 	// runtime values resolved.
 	Parameters Parameters
-
-	// NucleiTemplatesDirectory is a trusted runtime-only dependency. The
-	// execution wrapper sets it after admission from a job-owned immutable
-	// workspace; declared parameters and serialized job config cannot set it.
-	NucleiTemplatesDirectory string
-
-	// Identity is the runtime-owned outbound-identity apply context. The
-	// execution wrapper sets it after admission. Nil means no bound permit;
-	// header helpers must not borrow another execution's directives.
-	Identity context.Context
 
 	Metrics Metrics
 
