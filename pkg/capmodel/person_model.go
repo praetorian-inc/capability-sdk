@@ -8,7 +8,9 @@ type Person struct {
 	Email             string          `json:"email"`
 	Title             string          `json:"title"`
 	WorkEmail         string          `json:"work_email"`
+	Phones            *[]string       `json:"phones"`
 	GithubURL         string          `json:"github_url"`
+	LinkedinURL       string          `json:"linkedin_url"`
 	Country           string          `json:"country"`
 	State             string          `json:"state"`
 	City              string          `json:"city"`
