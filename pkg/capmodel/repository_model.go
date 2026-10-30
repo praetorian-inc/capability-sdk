@@ -8,6 +8,7 @@ type Repository struct {
 	Org              string            `json:"org"`
 	Name             string            `json:"name"`
 	Type             string            `json:"type"`
+	VCS              string            `json:"vcs"`
 	Public           bool              `json:"public"`
 	SelfHosted       bool              `json:"selfhosted"`
 	SourceArchiveKey string            `json:"sourceArchiveKey"`
