@@ -89,6 +89,7 @@ type ADObject struct {
 	CertificatePolicy                       []string `json:"certificatepolicy"`
 	CertTemplateOID                         string   `json:"certtemplateoid"`
 	GroupLinkID                             string   `json:"grouplinkid"`
+	GPOStatus                               string   `json:"gpostatus"`
 	ObjectGUID                              string   `json:"objectguid"`
 	ExpirePasswordsOnSmartCardOnlyAccounts  bool     `json:"expirepasswordsonsmartcardonlyaccounts"`
 	MachineAccountQuota                     int      `json:"machineaccountquota"`
